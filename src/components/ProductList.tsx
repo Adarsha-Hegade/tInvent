@@ -1,97 +1,84 @@
+import { useEffect, useState } from 'react';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Fan, Lightbulb } from 'lucide-react';
+import { supabase } from '@/lib/supabase';
+import type { Database } from '@/lib/database.types';
 
-const products = [
-  {
-    id: 1,
-    name: 'Premium Ceiling Fan X500',
-    type: 'Fan',
-    sku: 'FAN-X500-BLK',
-    stock: 45,
-    price: 299.99,
-    status: 'In Stock',
-  },
-  {
-    id: 2,
-    name: 'Smart LED Bulb 10W',
-    type: 'Light',
-    sku: 'LED-10W-SMT',
-    stock: 12,
-    price: 24.99,
-    status: 'Low Stock',
-  },
-  {
-    id: 3,
-    name: 'Modern Glass Pendant Light',
-    type: 'Light',
-    sku: 'PND-GLS-MOD',
-    stock: 28,
-    price: 199.99,
-    status: 'In Stock',
-  },
-  {
-    id: 4,
-    name: 'Industrial Ceiling Fan',
-    type: 'Fan',
-    sku: 'FAN-IND-72',
-    stock: 0,
-    price: 449.99,
-    status: 'Out of Stock',
-  },
-  {
-    id: 5,
-    name: 'Track Light Kit',
-    type: 'Light',
-    sku: 'TRK-LED-4',
-    stock: 15,
-    price: 89.99,
-    status: 'In Stock',
-  },
-];
+type Product = Database['public']['Tables']['products']['Row'];
 
 export function ProductList() {
+  const [products, setProducts] = useState<Product[]>([]);
+
+  useEffect(() => {
+    const fetchProducts = async () => {
+      const { data } = await supabase
+        .from('products')
+        .select('*')
+        .order('name')
+        .limit(5);
+      
+      if (data) setProducts(data);
+    };
+
+    fetchProducts();
+
+    // Subscribe to changes
+    const subscription = supabase
+      .channel('products_changes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'products' }, () => {
+        fetchProducts();
+      })
+      .subscribe();
+
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, []);
+
+  const getStockStatus = (product: Product) => {
+    const availableStock = product.available_stock;
+    if (availableStock <= 0) return { status: 'Out of Stock', variant: 'destructive' as const };
+    if (availableStock <= 10) return { status: 'Low Stock', variant: 'warning' as const };
+    return { status: 'In Stock', variant: 'default' as const };
+  };
+
   return (
     <div className="rounded-md border">
       <Table>
         <TableHeader>
           <TableRow>
             <TableHead>Product</TableHead>
-            <TableHead>Type</TableHead>
+            <TableHead>Model</TableHead>
             <TableHead>SKU</TableHead>
             <TableHead className="text-right">Stock</TableHead>
-            <TableHead className="text-right">Price</TableHead>
             <TableHead className="text-right">Status</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
-          {products.map((product) => (
-            <TableRow key={product.id}>
-              <TableCell className="font-medium">{product.name}</TableCell>
-              <TableCell>
-                <div className="flex items-center gap-2">
-                  {product.type === 'Fan' ? (
-                    <Fan className="h-4 w-4" />
-                  ) : (
-                    <Lightbulb className="h-4 w-4" />
-                  )}
-                  {product.type}
-                </div>
-              </TableCell>
-              <TableCell>{product.sku}</TableCell>
-              <TableCell className="text-right">{product.stock}</TableCell>
-              <TableCell className="text-right">${product.price}</TableCell>
-              <TableCell className="text-right">
-                <Badge variant={
-                  product.status === 'In Stock' ? 'default' :
-                  product.status === 'Low Stock' ? 'warning' :
-                  'destructive'
-                }>
-                  {product.status}
-                </Badge>
-              </TableCell>
-            </TableRow>
-          ))}
+          {products.map((product) => {
+            const { status, variant } = getStockStatus(product);
+            return (
+              <TableRow key={product.id}>
+                <TableCell className="font-medium">{product.name}</TableCell>
+                <TableCell>
+                  <div className="flex items-center gap-2">
+                    {product.manufacturer?.toLowerCase().includes('fan') ? (
+                      <Fan className="h-4 w-4" />
+                    ) : (
+                      <Lightbulb className="h-4 w-4" />
+                    )}
+                    {product.model_no}
+                  </div>
+                </TableCell>
+                <TableCell>{product.model_no}</TableCell>
+                <TableCell className="text-right">{product.available_stock}</TableCell>
+                <TableCell className="text-right">
+                  <Badge variant={variant}>{status}</Badge>
+                </TableCell>
+              </TableRow>
+            );
+          })}
         </TableBody>
       </Table>
     </div>

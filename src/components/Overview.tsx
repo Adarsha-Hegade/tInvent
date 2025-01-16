@@ -1,19 +1,54 @@
+import { useEffect, useState } from 'react';
 import { Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { colors } from '@/lib/colors';
+import { supabase } from '@/lib/supabase';
 
-const data = [
-  { name: 'Jan', total: 124 },
-  { name: 'Feb', total: 156 },
-  { name: 'Mar', total: 142 },
-  { name: 'Apr', total: 189 },
-  { name: 'May', total: 167 },
-  { name: 'Jun', total: 212 },
-  { name: 'Jul', total: 198 },
-  { name: 'Aug', total: 234 },
-  { name: 'Sep', total: 246 },
-];
+interface MonthlyData {
+  name: string;
+  total: number;
+}
 
 export function Overview() {
+  const [data, setData] = useState<MonthlyData[]>([]);
+
+  useEffect(() => {
+    const fetchMonthlyData = async () => {
+      const { data: products } = await supabase
+        .from('products')
+        .select('created_at, total_stock')
+        .order('created_at');
+
+      if (products) {
+        const monthlyData = products.reduce((acc: { [key: string]: number }, product) => {
+          const month = new Date(product.created_at).toLocaleString('default', { month: 'short' });
+          acc[month] = (acc[month] || 0) + product.total_stock;
+          return acc;
+        }, {});
+
+        const formattedData = Object.entries(monthlyData).map(([name, total]) => ({
+          name,
+          total,
+        }));
+
+        setData(formattedData);
+      }
+    };
+
+    fetchMonthlyData();
+
+    // Subscribe to changes
+    const subscription = supabase
+      .channel('products_changes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'products' }, () => {
+        fetchMonthlyData();
+      })
+      .subscribe();
+
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, []);
+
   return (
     <div className="pt-4">
       <ResponsiveContainer width="100%" height={350}>

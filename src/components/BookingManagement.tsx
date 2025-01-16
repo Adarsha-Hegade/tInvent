@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useForm } from 'react-hook-form';
-import { Plus, Pencil, Trash2 } from 'lucide-react';
+import { Plus, Pencil, Trash2, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -14,14 +14,28 @@ type Booking = Database['public']['Tables']['bookings']['Row'];
 type Product = Database['public']['Tables']['products']['Row'];
 type Customer = Database['public']['Tables']['customers']['Row'];
 
+interface BookingItem {
+  product_id: string;
+  quantity: number;
+  product?: Product;
+}
+
+interface BookingFormData {
+  customer_id: string;
+  status: 'pending' | 'advance_paid' | 'full_paid';
+  items: BookingItem[];
+}
+
 export function BookingManagement() {
-  const [bookings, setBookings] = useState<Booking[]>([]);
+  const [bookings, setBookings] = useState<(Booking & { items: BookingItem[], customer?: Customer })[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
-  const { register, handleSubmit, reset, setValue, watch } = useForm<Booking>({
+  const [editingBooking, setEditingBooking] = useState<Booking | null>(null);
+  const { register, handleSubmit, reset, setValue, watch } = useForm<BookingFormData>({
     defaultValues: {
-      status: 'pending' // Set default status
+      status: 'pending',
+      items: [{ product_id: '', quantity: 1 }]
     }
   });
 
@@ -32,44 +46,121 @@ export function BookingManagement() {
   }, []);
 
   const loadBookings = async () => {
-    const { data, error } = await supabase
+    const { data: bookingsData } = await supabase
       .from('bookings')
       .select(`
         *,
-        products:product_id(name),
-        customers:customer_id(name)
+        customers:customer_id(*),
+        items:booking_items(
+          *,
+          products:product_id(*)
+        )
       `);
-    if (data) setBookings(data);
-    if (error) console.error('Error loading bookings:', error);
+
+    if (bookingsData) {
+      setBookings(bookingsData.map(booking => ({
+        ...booking,
+        items: booking.items.map(item => ({
+          product_id: item.product_id,
+          quantity: item.quantity,
+          product: item.products
+        }))
+      })));
+    }
   };
 
   const loadProducts = async () => {
-    const { data, error } = await supabase.from('products').select('*');
+    const { data } = await supabase.from('products').select('*');
     if (data) setProducts(data);
-    if (error) console.error('Error loading products:', error);
   };
 
   const loadCustomers = async () => {
-    const { data, error } = await supabase.from('customers').select('*');
+    const { data } = await supabase.from('customers').select('*');
     if (data) setCustomers(data);
-    if (error) console.error('Error loading customers:', error);
   };
 
-  const onSubmit = async (data: Partial<Booking>) => {
-    const bookingData = {
-      ...data,
-      booking_date: new Date().toISOString(),
-      status: data.status || 'pending' // Ensure status is set
-    };
+  const onSubmit = async (data: BookingFormData) => {
+    const { items, ...bookingData } = data;
+    
+    if (editingBooking) {
+      // Update existing booking
+      const { error: bookingError } = await supabase
+        .from('bookings')
+        .update(bookingData)
+        .eq('id', editingBooking.id);
 
-    const { error } = await supabase.from('bookings').insert([bookingData]);
-    if (error) {
-      console.error('Error adding booking:', error);
+      if (!bookingError) {
+        // Delete existing items
+        await supabase
+          .from('booking_items')
+          .delete()
+          .eq('booking_id', editingBooking.id);
+
+        // Insert new items
+        const { error: itemsError } = await supabase
+          .from('booking_items')
+          .insert(items.map(item => ({
+            booking_id: editingBooking.id,
+            product_id: item.product_id,
+            quantity: item.quantity
+          })));
+
+        if (!itemsError) {
+          loadBookings();
+          setIsAddDialogOpen(false);
+          setEditingBooking(null);
+          reset();
+        }
+      }
     } else {
-      loadBookings();
-      setIsAddDialogOpen(false);
-      reset();
+      // Create new booking
+      const { data: newBooking, error: bookingError } = await supabase
+        .from('bookings')
+        .insert([bookingData])
+        .select()
+        .single();
+
+      if (newBooking && !bookingError) {
+        const { error: itemsError } = await supabase
+          .from('booking_items')
+          .insert(items.map(item => ({
+            booking_id: newBooking.id,
+            product_id: item.product_id,
+            quantity: item.quantity
+          })));
+
+        if (!itemsError) {
+          loadBookings();
+          setIsAddDialogOpen(false);
+          reset();
+        }
+      }
     }
+  };
+
+  const handleEdit = (booking: Booking & { items: BookingItem[], customer?: Customer }) => {
+    setEditingBooking(booking);
+    setValue('customer_id', booking.customer_id);
+    setValue('status', booking.status as 'pending' | 'advance_paid' | 'full_paid');
+    setValue('items', booking.items);
+    setIsAddDialogOpen(true);
+  };
+
+  const handleDelete = async (id: string) => {
+    const { error } = await supabase.from('bookings').delete().eq('id', id);
+    if (!error) {
+      loadBookings();
+    }
+  };
+
+  const addItem = () => {
+    const currentItems = watch('items') || [];
+    setValue('items', [...currentItems, { product_id: '', quantity: 1 }]);
+  };
+
+  const removeItem = (index: number) => {
+    const currentItems = watch('items') || [];
+    setValue('items', currentItems.filter((_, i) => i !== index));
   };
 
   return (
@@ -83,9 +174,9 @@ export function BookingManagement() {
               Add Booking
             </Button>
           </DialogTrigger>
-          <DialogContent>
+          <DialogContent className="max-w-2xl">
             <DialogHeader>
-              <DialogTitle>Add New Booking</DialogTitle>
+              <DialogTitle>{editingBooking ? 'Edit Booking' : 'Add New Booking'}</DialogTitle>
             </DialogHeader>
             <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
               <div className="space-y-4">
@@ -105,39 +196,76 @@ export function BookingManagement() {
                   </Select>
                 </div>
                 <div className="space-y-2">
-                  <label>Product</label>
-                  <Select onValueChange={(value) => setValue('product_id', value)}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select product" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {products.map((product) => (
-                        <SelectItem key={product.id} value={product.id}>
-                          {product.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <label>Quantity</label>
-                  <Input type="number" {...register('quantity')} required min="1" />
-                </div>
-                <div className="space-y-2">
                   <label>Status</label>
-                  <Select onValueChange={(value) => setValue('status', value)} defaultValue="pending">
+                  <Select onValueChange={(value) => setValue('status', value as 'pending' | 'advance_paid' | 'full_paid')} defaultValue="pending">
                     <SelectTrigger>
                       <SelectValue placeholder="Select status" />
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="pending">Pending</SelectItem>
-                      <SelectItem value="confirmed">Confirmed</SelectItem>
-                      <SelectItem value="cancelled">Cancelled</SelectItem>
+                      <SelectItem value="advance_paid">Advance Paid</SelectItem>
+                      <SelectItem value="full_paid">Full Paid</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
+                <div className="space-y-4">
+                  <div className="flex justify-between items-center">
+                    <label>Products</label>
+                    <Button type="button" variant="outline" size="sm" onClick={addItem}>
+                      <Plus className="w-4 h-4 mr-2" />
+                      Add Product
+                    </Button>
+                  </div>
+                  {watch('items')?.map((item, index) => (
+                    <div key={index} className="flex gap-4 items-start">
+                      <div className="flex-1">
+                        <Select
+                          onValueChange={(value) => {
+                            const items = watch('items');
+                            items[index].product_id = value;
+                            setValue('items', items);
+                          }}
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select product" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {products.map((product) => (
+                              <SelectItem key={product.id} value={product.id}>
+                                {product.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="w-32">
+                        <Input
+                          type="number"
+                          min="1"
+                          placeholder="Quantity"
+                          value={item.quantity}
+                          onChange={(e) => {
+                            const items = watch('items');
+                            items[index].quantity = parseInt(e.target.value);
+                            setValue('items', items);
+                          }}
+                        />
+                      </div>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => removeItem(index)}
+                      >
+                        <X className="w-4 h-4" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
               </div>
-              <Button type="submit" className="w-full">Add Booking</Button>
+              <Button type="submit" className="w-full">
+                {editingBooking ? 'Update Booking' : 'Add Booking'}
+              </Button>
             </form>
           </DialogContent>
         </Dialog>
@@ -148,8 +276,7 @@ export function BookingManagement() {
           <TableHeader>
             <TableRow>
               <TableHead>Customer</TableHead>
-              <TableHead>Product</TableHead>
-              <TableHead>Quantity</TableHead>
+              <TableHead>Products</TableHead>
               <TableHead>Status</TableHead>
               <TableHead>Booking Date</TableHead>
               <TableHead>Actions</TableHead>
@@ -158,13 +285,20 @@ export function BookingManagement() {
           <TableBody>
             {bookings.map((booking) => (
               <TableRow key={booking.id}>
-                <TableCell>{booking.customers?.name}</TableCell>
-                <TableCell>{booking.products?.name}</TableCell>
-                <TableCell>{booking.quantity}</TableCell>
+                <TableCell>{booking.customer?.name}</TableCell>
+                <TableCell>
+                  <div className="space-y-1">
+                    {booking.items.map((item, index) => (
+                      <div key={index} className="text-sm">
+                        {item.product?.name} x {item.quantity}
+                      </div>
+                    ))}
+                  </div>
+                </TableCell>
                 <TableCell>
                   <Badge variant={
-                    booking.status === 'confirmed' ? 'default' :
-                    booking.status === 'pending' ? 'secondary' :
+                    booking.status === 'full_paid' ? 'default' :
+                    booking.status === 'advance_paid' ? 'secondary' :
                     'destructive'
                   }>
                     {booking.status}
@@ -173,10 +307,10 @@ export function BookingManagement() {
                 <TableCell>{new Date(booking.booking_date).toLocaleDateString()}</TableCell>
                 <TableCell>
                   <div className="flex gap-2">
-                    <Button variant="ghost" size="icon">
+                    <Button variant="ghost" size="icon" onClick={() => handleEdit(booking)}>
                       <Pencil className="w-4 h-4" />
                     </Button>
-                    <Button variant="ghost" size="icon">
+                    <Button variant="ghost" size="icon" onClick={() => handleDelete(booking.id)}>
                       <Trash2 className="w-4 h-4" />
                     </Button>
                   </div>
