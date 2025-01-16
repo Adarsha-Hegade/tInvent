@@ -80,61 +80,72 @@ export function BookingManagement() {
   };
 
   const onSubmit = async (data: BookingFormData) => {
-    const { items, ...bookingData } = data;
-    
-    if (editingBooking) {
-      // Update existing booking
-      const { error: bookingError } = await supabase
-        .from('bookings')
-        .update(bookingData)
-        .eq('id', editingBooking.id);
+    try {
+      if (editingBooking) {
+        // Update existing booking
+        const { error: bookingError } = await supabase
+          .from('bookings')
+          .update({
+            customer_id: data.customer_id,
+            status: data.status
+          })
+          .eq('id', editingBooking.id);
 
-      if (!bookingError) {
-        // Delete existing items
-        await supabase
-          .from('booking_items')
-          .delete()
-          .eq('booking_id', editingBooking.id);
+        if (!bookingError) {
+          // Delete existing items
+          await supabase
+            .from('booking_items')
+            .delete()
+            .eq('booking_id', editingBooking.id);
 
-        // Insert new items
-        const { error: itemsError } = await supabase
-          .from('booking_items')
-          .insert(items.map(item => ({
-            booking_id: editingBooking.id,
-            product_id: item.product_id,
-            quantity: item.quantity
-          })));
+          // Insert new items
+          const { error: itemsError } = await supabase
+            .from('booking_items')
+            .insert(data.items.map(item => ({
+              booking_id: editingBooking.id,
+              product_id: item.product_id,
+              quantity: item.quantity
+            })));
 
-        if (!itemsError) {
-          loadBookings();
-          setIsAddDialogOpen(false);
-          setEditingBooking(null);
-          reset();
+          if (!itemsError) {
+            loadBookings();
+            setIsAddDialogOpen(false);
+            setEditingBooking(null);
+            reset();
+          }
         }
-      }
-    } else {
-      // Create new booking
-      const { data: newBooking, error: bookingError } = await supabase
-        .from('bookings')
-        .insert([bookingData])
-        .select()
-        .single();
+      } else {
+        // Create new booking
+        const { data: newBooking, error: bookingError } = await supabase
+          .from('bookings')
+          .insert([{
+            customer_id: data.customer_id,
+            status: data.status
+          }])
+          .select()
+          .single();
 
-      if (newBooking && !bookingError) {
-        const { error: itemsError } = await supabase
-          .from('booking_items')
-          .insert(items.map(item => ({
+        if (newBooking && !bookingError) {
+          const bookingItems = data.items.map(item => ({
             booking_id: newBooking.id,
             product_id: item.product_id,
             quantity: item.quantity
-          })));
+          }));
 
-        if (!itemsError) {
-          loadBookings();
-          setIsAddDialogOpen(false);
-          reset();
+          const { error: itemsError } = await supabase
+            .from('booking_items')
+            .insert(bookingItems);
+
+          if (!itemsError) {
+            loadBookings();
+            setIsAddDialogOpen(false);
+            reset();
+          }
         }
       }
+    } catch (error) {
+      console.error('Error saving booking:', error);
+      console.log(item.quantity);console.log(quantity);
     }
   };
 
@@ -182,7 +193,7 @@ export function BookingManagement() {
               <div className="space-y-4">
                 <div className="space-y-2">
                   <label>Customer</label>
-                  <Select onValueChange={(value) => setValue('customer_id', value)}>
+                  <Select onValueChange={(value) => setValue('customer_id', value)} required>
                     <SelectTrigger>
                       <SelectValue placeholder="Select customer" />
                     </SelectTrigger>
@@ -197,7 +208,10 @@ export function BookingManagement() {
                 </div>
                 <div className="space-y-2">
                   <label>Status</label>
-                  <Select onValueChange={(value) => setValue('status', value as 'pending' | 'advance_paid' | 'full_paid')} defaultValue="pending">
+                  <Select 
+                    onValueChange={(value) => setValue('status', value as 'pending' | 'advance_paid' | 'full_paid')} 
+                    defaultValue="pending"
+                  >
                     <SelectTrigger>
                       <SelectValue placeholder="Select status" />
                     </SelectTrigger>
@@ -225,6 +239,7 @@ export function BookingManagement() {
                             items[index].product_id = value;
                             setValue('items', items);
                           }}
+                          required
                         >
                           <SelectTrigger>
                             <SelectValue placeholder="Select product" />
@@ -246,9 +261,10 @@ export function BookingManagement() {
                           value={item.quantity}
                           onChange={(e) => {
                             const items = watch('items');
-                            items[index].quantity = parseInt(e.target.value);
+                            items[index].quantity = parseInt(e.target.value) || 1;
                             setValue('items', items);
                           }}
+                          required
                         />
                       </div>
                       <Button
@@ -256,6 +272,7 @@ export function BookingManagement() {
                         variant="ghost"
                         size="icon"
                         onClick={() => removeItem(index)}
+                        disabled={watch('items')?.length === 1}
                       >
                         <X className="w-4 h-4" />
                       </Button>

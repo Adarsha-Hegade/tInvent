@@ -4,27 +4,35 @@ import { User } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import type { Database } from '@/lib/database.types';
 
-type Booking = Database['public']['Tables']['bookings']['Row'] & {
-  products: Database['public']['Tables']['products']['Row'];
-  customers: Database['public']['Tables']['customers']['Row'];
+type BookingWithDetails = Database['public']['Tables']['bookings']['Row'] & {
+  customer?: Database['public']['Tables']['customers']['Row'];
+  items?: {
+    product?: Database['public']['Tables']['products']['Row'];
+    quantity: number;
+  }[];
 };
 
 export function RecentSales() {
-  const [recentBookings, setRecentBookings] = useState<Booking[]>([]);
+  const [recentBookings, setRecentBookings] = useState<BookingWithDetails[]>([]);
 
   useEffect(() => {
     const fetchRecentBookings = async () => {
       const { data } = await supabase
         .from('bookings')
         .select(`
-          *,
-          products:product_id(*),
-          customers:customer_id(*)
+          id,
+          status,
+          created_at,
+          customer:customer_id(name),
+          items:booking_items(
+            quantity,
+            product:product_id(name)
+          )
         `)
         .order('created_at', { ascending: false })
         .limit(3);
 
-      if (data) setRecentBookings(data as Booking[]);
+      if (data) setRecentBookings(data);
     };
 
     fetchRecentBookings();
@@ -51,14 +59,29 @@ export function RecentSales() {
           </Avatar>
           <div className="ml-4 space-y-1">
             <p className="text-sm font-medium">
-              {booking.customers?.name || 'Unknown Customer'}
+              {booking.customer?.name || 'Unknown Customer'}
             </p>
             <p className="text-sm text-muted-foreground">
-              {booking.quantity} units • {booking.products?.name}
+              {booking.items?.map((item, index) => (
+                <span key={index}>
+                  {item.quantity} × {item.product?.name}
+                  {index < (booking.items?.length || 0) - 1 ? ', ' : ''}
+                </span>
+              ))}
             </p>
           </div>
-          <div className={`ml-auto font-medium ${booking.status === 'confirmed' ? 'text-green-600' : 'text-amber-600'}`}>
-            {booking.status === 'confirmed' ? 'Confirmed' : 'Pending'}
+          <div className={`ml-auto font-medium ${
+            booking.status === 'full_paid' 
+              ? 'text-green-600' 
+              : booking.status === 'advance_paid'
+                ? 'text-amber-600'
+                : 'text-gray-600'
+          }`}>
+            {booking.status === 'full_paid' 
+              ? 'Paid' 
+              : booking.status === 'advance_paid'
+                ? 'Advance'
+                : 'Pending'}
           </div>
         </div>
       ))}
