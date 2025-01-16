@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useForm } from 'react-hook-form';
 import { Plus, Pencil, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -15,6 +15,10 @@ export function CustomerManagement() {
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const { register, handleSubmit, reset } = useForm<Customer>();
 
+  useEffect(() => {
+    loadCustomers();
+  }, []); // Load customers when component mounts
+
   const loadCustomers = async () => {
     const { data, error } = await supabase.from('customers').select('*');
     if (data) setCustomers(data);
@@ -23,9 +27,10 @@ export function CustomerManagement() {
 
   const onSubmit = async (data: Partial<Customer>) => {
     const { error } = await supabase.from('customers').insert([data]);
-    if (error) console.error('Error adding customer:', error);
-    else {
-      loadCustomers();
+    if (error) {
+      console.error('Error adding customer:', error);
+    } else {
+      await loadCustomers();
       setIsAddDialogOpen(false);
       reset();
     }

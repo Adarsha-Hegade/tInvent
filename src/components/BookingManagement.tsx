@@ -19,7 +19,11 @@ export function BookingManagement() {
   const [products, setProducts] = useState<Product[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
-  const { register, handleSubmit, reset } = useForm<Booking>();
+  const { register, handleSubmit, reset, setValue, watch } = useForm<Booking>({
+    defaultValues: {
+      status: 'pending' // Set default status
+    }
+  });
 
   useEffect(() => {
     loadBookings();
@@ -52,9 +56,16 @@ export function BookingManagement() {
   };
 
   const onSubmit = async (data: Partial<Booking>) => {
-    const { error } = await supabase.from('bookings').insert([data]);
-    if (error) console.error('Error adding booking:', error);
-    else {
+    const bookingData = {
+      ...data,
+      booking_date: new Date().toISOString(),
+      status: data.status || 'pending' // Ensure status is set
+    };
+
+    const { error } = await supabase.from('bookings').insert([bookingData]);
+    if (error) {
+      console.error('Error adding booking:', error);
+    } else {
       loadBookings();
       setIsAddDialogOpen(false);
       reset();
@@ -80,7 +91,7 @@ export function BookingManagement() {
               <div className="space-y-4">
                 <div className="space-y-2">
                   <label>Customer</label>
-                  <Select {...register('customer_id')}>
+                  <Select onValueChange={(value) => setValue('customer_id', value)}>
                     <SelectTrigger>
                       <SelectValue placeholder="Select customer" />
                     </SelectTrigger>
@@ -95,7 +106,7 @@ export function BookingManagement() {
                 </div>
                 <div className="space-y-2">
                   <label>Product</label>
-                  <Select {...register('product_id')}>
+                  <Select onValueChange={(value) => setValue('product_id', value)}>
                     <SelectTrigger>
                       <SelectValue placeholder="Select product" />
                     </SelectTrigger>
@@ -114,7 +125,7 @@ export function BookingManagement() {
                 </div>
                 <div className="space-y-2">
                   <label>Status</label>
-                  <Select {...register('status')}>
+                  <Select onValueChange={(value) => setValue('status', value)} defaultValue="pending">
                     <SelectTrigger>
                       <SelectValue placeholder="Select status" />
                     </SelectTrigger>

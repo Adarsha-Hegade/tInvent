@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { StatCard } from '@/components/StatCard';
 import { Overview } from '@/components/Overview';
@@ -9,13 +9,34 @@ import { DashboardShell } from '@/components/DashboardShell';
 import { ProductManagement } from '@/components/ProductManagement';
 import { CustomerManagement } from '@/components/CustomerManagement';
 import { BookingManagement } from '@/components/BookingManagement';
+import { Auth } from '@/components/Auth';
+import { supabase } from '@/lib/supabase';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
+  const [session, setSession] = useState(null);
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+    });
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session);
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+
+  if (!session) {
+    return <Auth />;
+  }
 
   return (
     <DashboardShell>
-      <DashboardHeader />
+      <DashboardHeader session={session} />
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
         <TabsList>
           <TabsTrigger value="dashboard">Dashboard</TabsTrigger>
