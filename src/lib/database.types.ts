@@ -18,8 +18,11 @@ export interface Database {
           size: string | null
           finish: string | null
           manufacturer: string | null
+          remarks: string | null
+          internal_notes: string | null
           total_stock: number
           bad_stock: number
+          dead_stock: number
           bookings: number
           available_stock: number
           created_at: string
@@ -33,8 +36,11 @@ export interface Database {
           size?: string | null
           finish?: string | null
           manufacturer?: string | null
+          remarks?: string | null
+          internal_notes?: string | null
           total_stock?: number
           bad_stock?: number
+          dead_stock?: number
           bookings?: number
         }
         Update: {
@@ -45,8 +51,11 @@ export interface Database {
           size?: string | null
           finish?: string | null
           manufacturer?: string | null
+          remarks?: string | null
+          internal_notes?: string | null
           total_stock?: number
           bad_stock?: number
+          dead_stock?: number
           bookings?: number
         }
       }
@@ -79,9 +88,8 @@ export interface Database {
         Row: {
           id: string
           customer_id: string
-          product_id: string
-          quantity: number
-          status: 'pending' | 'confirmed' | 'cancelled'
+          status: 'pending' | 'advance_paid' | 'full_paid'
+          total_amount: number
           booking_date: string
           created_at: string
           updated_at: string
@@ -89,18 +97,38 @@ export interface Database {
         Insert: {
           id?: string
           customer_id: string
-          product_id: string
-          quantity: number
-          status?: 'pending' | 'confirmed' | 'cancelled'
+          status?: 'pending' | 'advance_paid' | 'full_paid'
+          total_amount?: number
           booking_date?: string
         }
         Update: {
           id?: string
           customer_id?: string
+          status?: 'pending' | 'advance_paid' | 'full_paid'
+          total_amount?: number
+          booking_date?: string
+        }
+      }
+      booking_items: {
+        Row: {
+          id: string
+          booking_id: string
+          product_id: string
+          quantity: number
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          booking_id: string
+          product_id: string
+          quantity: number
+        }
+        Update: {
+          id?: string
+          booking_id?: string
           product_id?: string
           quantity?: number
-          status?: 'pending' | 'confirmed' | 'cancelled'
-          booking_date?: string
         }
       }
       user_profiles: {

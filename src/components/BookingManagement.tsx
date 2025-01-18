@@ -1,12 +1,12 @@
 import { useState, useEffect } from 'react';
 import { useForm } from 'react-hook-form';
-import { Plus, Pencil, Trash2, X } from 'lucide-react';
+import { Plus, Pencil, Trash2, X, Package2, User, Calendar, Mail, Phone, MapPin, AlertTriangle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
+import { Card, CardContent } from '@/components/ui/card';
 import { supabase } from '@/lib/supabase';
 import type { Database } from '@/lib/database.types';
 
@@ -15,6 +15,7 @@ type Product = Database['public']['Tables']['products']['Row'];
 type Customer = Database['public']['Tables']['customers']['Row'];
 
 interface BookingItem {
+  id?: string;
   product_id: string;
   quantity: number;
   product?: Product;
@@ -31,7 +32,8 @@ export function BookingManagement() {
   const [products, setProducts] = useState<Product[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
-  const [editingBooking, setEditingBooking] = useState<Booking | null>(null);
+  const [editingBooking, setEditingBooking] = useState<(Booking & { items: BookingItem[], customer?: Customer }) | null>(null);
+  const [validationError, setValidationError] = useState<string | null>(null);
   const { register, handleSubmit, reset, setValue, watch } = useForm<BookingFormData>({
     defaultValues: {
       status: 'pending',
@@ -46,24 +48,30 @@ export function BookingManagement() {
   }, []);
 
   const loadBookings = async () => {
-    const { data: bookingsData } = await supabase
+    const { data: bookingsData, error } = await supabase
       .from('bookings')
       .select(`
         *,
-        customers:customer_id(*),
+        customer:customer_id(*),
         items:booking_items(
           *,
-          products:product_id(*)
+          product:product_id(*)
         )
       `);
+
+    if (error) {
+      console.error('Error loading bookings:', error);
+      return;
+    }
 
     if (bookingsData) {
       setBookings(bookingsData.map(booking => ({
         ...booking,
         items: booking.items.map(item => ({
+          id: item.id,
           product_id: item.product_id,
           quantity: item.quantity,
-          product: item.products
+          product: item.product
         }))
       })));
     }
@@ -77,6 +85,17 @@ export function BookingManagement() {
   const loadCustomers = async () => {
     const { data } = await supabase.from('customers').select('*');
     if (data) setCustomers(data);
+  };
+
+  const checkOverbooked = (items: BookingItem[]): { isOverbooked: boolean; overbooked: string[] } => {
+    const overbooked: string[] = [];
+    for (const item of items) {
+      const product = products.find(p => p.id === item.product_id);
+      if (product && item.quantity > product.available_stock) {
+        overbooked.push(product.name);
+      }
+    }
+    return { isOverbooked: overbooked.length > 0, overbooked };
   };
 
   const onSubmit = async (data: BookingFormData) => {
@@ -108,7 +127,7 @@ export function BookingManagement() {
             })));
 
           if (!itemsError) {
-            loadBookings();
+            await loadBookings();
             setIsAddDialogOpen(false);
             setEditingBooking(null);
             reset();
@@ -137,7 +156,7 @@ export function BookingManagement() {
             .insert(bookingItems);
 
           if (!itemsError) {
-            loadBookings();
+            await loadBookings();
             setIsAddDialogOpen(false);
             reset();
           }
@@ -145,15 +164,18 @@ export function BookingManagement() {
       }
     } catch (error) {
       console.error('Error saving booking:', error);
-      console.log(item.quantity);console.log(quantity);
     }
   };
 
   const handleEdit = (booking: Booking & { items: BookingItem[], customer?: Customer }) => {
     setEditingBooking(booking);
     setValue('customer_id', booking.customer_id);
-    setValue('status', booking.status as 'pending' | 'advance_paid' | 'full_paid');
-    setValue('items', booking.items);
+    setValue('status', booking.status);
+    setValue('items', booking.items.map(item => ({
+      id: item.id,
+      product_id: item.product_id,
+      quantity: item.quantity
+    })));
     setIsAddDialogOpen(true);
   };
 
@@ -174,8 +196,30 @@ export function BookingManagement() {
     setValue('items', currentItems.filter((_, i) => i !== index));
   };
 
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case 'full_paid':
+        return 'border-l-success';
+      case 'advance_paid':
+        return 'border-l-warning';
+      default:
+        return 'border-l-danger';
+    }
+  };
+
+  const getStatusBadgeVariant = (status: string) => {
+    switch (status) {
+      case 'full_paid':
+        return 'default';
+      case 'advance_paid':
+        return 'secondary';
+      default:
+        return 'destructive';
+    }
+  };
+
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
       <div className="flex justify-between items-center">
         <h2 className="text-2xl font-bold">Booking Management</h2>
         <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
@@ -190,10 +234,19 @@ export function BookingManagement() {
               <DialogTitle>{editingBooking ? 'Edit Booking' : 'Add New Booking'}</DialogTitle>
             </DialogHeader>
             <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+              {validationError && (
+                <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-md">
+                  {validationError}
+                </div>
+              )}
               <div className="space-y-4">
                 <div className="space-y-2">
                   <label>Customer</label>
-                  <Select onValueChange={(value) => setValue('customer_id', value)} required>
+                  <Select 
+                    value={watch('customer_id')}
+                    onValueChange={(value) => setValue('customer_id', value)} 
+                    required
+                  >
                     <SelectTrigger>
                       <SelectValue placeholder="Select customer" />
                     </SelectTrigger>
@@ -209,8 +262,8 @@ export function BookingManagement() {
                 <div className="space-y-2">
                   <label>Status</label>
                   <Select 
-                    onValueChange={(value) => setValue('status', value as 'pending' | 'advance_paid' | 'full_paid')} 
-                    defaultValue="pending"
+                    value={watch('status')}
+                    onValueChange={(value) => setValue('status', value as 'pending' | 'advance_paid' | 'full_paid')}
                   >
                     <SelectTrigger>
                       <SelectValue placeholder="Select status" />
@@ -234,6 +287,7 @@ export function BookingManagement() {
                     <div key={index} className="flex gap-4 items-start">
                       <div className="flex-1">
                         <Select
+                          value={item.product_id}
                           onValueChange={(value) => {
                             const items = watch('items');
                             items[index].product_id = value;
@@ -247,7 +301,7 @@ export function BookingManagement() {
                           <SelectContent>
                             {products.map((product) => (
                               <SelectItem key={product.id} value={product.id}>
-                                {product.name}
+                                {product.name} (Available: {product.available_stock})
                               </SelectItem>
                             ))}
                           </SelectContent>
@@ -288,54 +342,105 @@ export function BookingManagement() {
         </Dialog>
       </div>
 
-      <div className="border rounded-lg">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Customer</TableHead>
-              <TableHead>Products</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead>Booking Date</TableHead>
-              <TableHead>Actions</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {bookings.map((booking) => (
-              <TableRow key={booking.id}>
-                <TableCell>{booking.customer?.name}</TableCell>
-                <TableCell>
-                  <div className="space-y-1">
-                    {booking.items.map((item, index) => (
-                      <div key={index} className="text-sm">
-                        {item.product?.name} x {item.quantity}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        {bookings.map((booking) => {
+          const { isOverbooked, overbooked } = checkOverbooked(booking.items);
+          return (
+            <Card 
+              key={booking.id} 
+              className={`relative overflow-hidden group transition-all hover:shadow-lg border-l-4 ${getStatusColor(booking.status)}`}
+            >
+              <div className="absolute inset-0 bg-gradient-to-r from-primary/5 to-transparent" />
+              <CardContent className="p-6">
+                <div className="flex flex-col space-y-4">
+                  {/* Customer Details Section */}
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center space-x-2">
+                        <User className="w-5 h-5 text-primary" />
+                        <h3 className="text-lg font-semibold">{booking.customer?.name}</h3>
                       </div>
-                    ))}
+                      <Badge variant={getStatusBadgeVariant(booking.status)}>
+                        {booking.status}
+                      </Badge>
+                    </div>
+                    
+                    {booking.customer?.email && (
+                      <div className="flex items-center space-x-2 text-sm text-muted-foreground">
+                        <Mail className="w-4 h-4" />
+                        <span>{booking.customer.email}</span>
+                      </div>
+                    )}
+                    
+                    {booking.customer?.phone && (
+                      <div className="flex items-center space-x-2 text-sm text-muted-foreground">
+                        <Phone className="w-4 h-4" />
+                        <span>{booking.customer.phone}</span>
+                      </div>
+                    )}
+                    
+                    {booking.customer?.address && (
+                      <div className="flex items-center space-x-2 text-sm text-muted-foreground">
+                        <MapPin className="w-4 h-4" />
+                        <span>{booking.customer.address}</span>
+                      </div>
+                    )}
                   </div>
-                </TableCell>
-                <TableCell>
-                  <Badge variant={
-                    booking.status === 'full_paid' ? 'default' :
-                    booking.status === 'advance_paid' ? 'secondary' :
-                    'destructive'
-                  }>
-                    {booking.status}
-                  </Badge>
-                </TableCell>
-                <TableCell>{new Date(booking.booking_date).toLocaleDateString()}</TableCell>
-                <TableCell>
-                  <div className="flex gap-2">
-                    <Button variant="ghost" size="icon" onClick={() => handleEdit(booking)}>
-                      <Pencil className="w-4 h-4" />
-                    </Button>
-                    <Button variant="ghost" size="icon" onClick={() => handleDelete(booking.id)}>
-                      <Trash2 className="w-4 h-4" />
-                    </Button>
+
+                  {isOverbooked && (
+                    <div className="flex items-center gap-2 p-2 bg-destructive/10 text-destructive rounded-md">
+                      <AlertTriangle className="w-4 h-4" />
+                      <span className="text-sm font-medium">Overbooked: {overbooked.join(', ')}</span>
+                    </div>
+                  )}
+
+                  <hr className="border-border" />
+
+                  {/* Products Section */}
+                  <div className="space-y-3">
+                    <h4 className="font-medium text-sm text-muted-foreground">Products</h4>
+                    <div className="space-y-2">
+                      {booking.items.map((item, index) => {
+                        const isItemOverbooked = item.product && item.quantity > item.product.available_stock;
+                        return (
+                          <div key={index} className="flex items-center justify-between text-sm">
+                            <div className="flex items-center space-x-2">
+                              <Package2 className="w-4 h-4 text-muted-foreground" />
+                              <span className={isItemOverbooked ? 'text-destructive font-medium' : ''}>
+                                {item.product?.name}
+                              </span>
+                            </div>
+                            <span className={`font-medium ${isItemOverbooked ? 'text-destructive' : ''}`}>
+                              × {item.quantity}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+
+                  <hr className="border-border" />
+
+                  {/* Footer Section */}
+                  <div className="flex items-center justify-between pt-2">
+                    <div className="flex items-center space-x-2 text-sm text-muted-foreground">
+                      <Calendar className="w-4 h-4" />
+                      <span>{new Date(booking.booking_date).toLocaleDateString()}</span>
+                    </div>
+                    <div className="flex gap-2">
+                      <Button variant="ghost" size="icon" onClick={() => handleEdit(booking)}>
+                        <Pencil className="w-4 h-4" />
+                      </Button>
+                      <Button variant="ghost" size="icon" onClick={() => handleDelete(booking.id)}>
+                        <Trash2 className="w-4 h-4" />
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          );
+        })}
       </div>
     </div>
   );

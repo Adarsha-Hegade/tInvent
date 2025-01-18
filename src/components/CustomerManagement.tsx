@@ -12,12 +12,13 @@ type Customer = Database['public']['Tables']['customers']['Row'];
 
 export function CustomerManagement() {
   const [customers, setCustomers] = useState<Customer[]>([]);
-  const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
-  const { register, handleSubmit, reset } = useForm<Customer>();
+  const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
+  const { register, handleSubmit, reset, setValue } = useForm<Customer>();
 
   useEffect(() => {
     loadCustomers();
-  }, []); // Load customers when component mounts
+  }, []);
 
   const loadCustomers = async () => {
     const { data, error } = await supabase.from('customers').select('*');
@@ -26,13 +27,45 @@ export function CustomerManagement() {
   };
 
   const onSubmit = async (data: Partial<Customer>) => {
-    const { error } = await supabase.from('customers').insert([data]);
-    if (error) {
-      console.error('Error adding customer:', error);
-    } else {
+    try {
+      if (editingCustomer) {
+        const { error } = await supabase
+          .from('customers')
+          .update(data)
+          .eq('id', editingCustomer.id);
+        
+        if (!error) {
+          await loadCustomers();
+          setIsDialogOpen(false);
+          setEditingCustomer(null);
+          reset();
+        }
+      } else {
+        const { error } = await supabase.from('customers').insert([data]);
+        if (!error) {
+          await loadCustomers();
+          setIsDialogOpen(false);
+          reset();
+        }
+      }
+    } catch (error) {
+      console.error('Error saving customer:', error);
+    }
+  };
+
+  const handleEdit = (customer: Customer) => {
+    setEditingCustomer(customer);
+    setValue('name', customer.name);
+    setValue('email', customer.email || '');
+    setValue('phone', customer.phone || '');
+    setValue('address', customer.address || '');
+    setIsDialogOpen(true);
+  };
+
+  const handleDelete = async (id: string) => {
+    const { error } = await supabase.from('customers').delete().eq('id', id);
+    if (!error) {
       await loadCustomers();
-      setIsAddDialogOpen(false);
-      reset();
     }
   };
 
@@ -40,7 +73,13 @@ export function CustomerManagement() {
     <div className="space-y-4">
       <div className="flex justify-between items-center">
         <h2 className="text-2xl font-bold">Customer Management</h2>
-        <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
+        <Dialog open={isDialogOpen} onOpenChange={(open) => {
+          setIsDialogOpen(open);
+          if (!open) {
+            setEditingCustomer(null);
+            reset();
+          }
+        }}>
           <DialogTrigger asChild>
             <Button>
               <Plus className="w-4 h-4 mr-2" />
@@ -49,7 +88,7 @@ export function CustomerManagement() {
           </DialogTrigger>
           <DialogContent>
             <DialogHeader>
-              <DialogTitle>Add New Customer</DialogTitle>
+              <DialogTitle>{editingCustomer ? 'Edit Customer' : 'Add New Customer'}</DialogTitle>
             </DialogHeader>
             <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
               <div className="space-y-4">
@@ -70,7 +109,9 @@ export function CustomerManagement() {
                   <Input {...register('address')} />
                 </div>
               </div>
-              <Button type="submit" className="w-full">Add Customer</Button>
+              <Button type="submit" className="w-full">
+                {editingCustomer ? 'Update Customer' : 'Add Customer'}
+              </Button>
             </form>
           </DialogContent>
         </Dialog>
@@ -96,10 +137,10 @@ export function CustomerManagement() {
                 <TableCell>{customer.address}</TableCell>
                 <TableCell>
                   <div className="flex gap-2">
-                    <Button variant="ghost" size="icon">
+                    <Button variant="ghost" size="icon" onClick={() => handleEdit(customer)}>
                       <Pencil className="w-4 h-4" />
                     </Button>
-                    <Button variant="ghost" size="icon">
+                    <Button variant="ghost" size="icon" onClick={() => handleDelete(customer.id)}>
                       <Trash2 className="w-4 h-4" />
                     </Button>
                   </div>
