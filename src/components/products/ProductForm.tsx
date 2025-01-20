@@ -16,15 +16,27 @@ interface ProductFormProps {
 
 export function ProductForm({ product, manufacturers, onSubmit }: ProductFormProps) {
   const { register, handleSubmit, setValue, watch } = useForm<Partial<Product>>({
-    defaultValues: product || {
-      total_stock: 0,
-      bad_stock: 0,
-      dead_stock: 0,
+    defaultValues: {
+      model_no: product?.model_no || '',
+      name: product?.name || '',
+      manufacturer_id: product?.manufacturer_id || '',
+      description: product?.description || '',
+      remarks: product?.remarks || '',
+      internal_notes: product?.internal_notes || '',
+      total_stock: product?.total_stock || 0,
+      bad_stock: product?.bad_stock || 0,
+      dead_stock: product?.dead_stock || 0,
     },
   });
 
+  const handleFormSubmit = async (data: Partial<Product>) => {
+    // Remove generated columns before submitting
+    const { available_stock, bookings, created_at, updated_at, ...submitData } = data as any;
+    await onSubmit(submitData);
+  };
+
   return (
-    <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+    <form onSubmit={handleSubmit(handleFormSubmit)} className="space-y-4">
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-2">
           <label>Model No</label>
@@ -66,15 +78,15 @@ export function ProductForm({ product, manufacturers, onSubmit }: ProductFormPro
         </div>
         <div className="space-y-2">
           <label>Total Stock</label>
-          <Input type="number" {...register('total_stock')} required />
+          <Input type="number" {...register('total_stock', { valueAsNumber: true })} required />
         </div>
         <div className="space-y-2">
           <label>Bad Stock</label>
-          <Input type="number" {...register('bad_stock')} required />
+          <Input type="number" {...register('bad_stock', { valueAsNumber: true })} required />
         </div>
         <div className="space-y-2">
           <label>Dead Stock</label>
-          <Input type="number" {...register('dead_stock')} required />
+          <Input type="number" {...register('dead_stock', { valueAsNumber: true })} required />
         </div>
       </div>
       <Button type="submit" className="w-full">

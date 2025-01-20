@@ -10,7 +10,7 @@ import { supabase } from '@/lib/supabase';
 import type { Database } from '@/lib/database.types';
 
 type Product = Database['public']['Tables']['products']['Row'] & {
-  manufacturer_details?: Database['public']['Tables']['manufacturers']['Row'];
+  manufacturer?: Database['public']['Tables']['manufacturers']['Row'];
 };
 
 type SortField = 'name' | 'total_stock' | 'available_stock' | 'bad_stock' | 'dead_stock' | 'bookings';
@@ -46,14 +46,14 @@ export function ProductList({ onEdit, onDelete }: ProductListProps) {
     return () => {
       subscription.unsubscribe();
     };
-  }, []);
+  }, [sortField, sortOrder]); // Re-fetch when sort changes
 
   const loadProducts = async () => {
     const { data: productsData } = await supabase
       .from('products')
       .select(`
         *,
-        manufacturer_details:manufacturers(*)
+        manufacturer:manufacturer_id(*)
       `)
       .order(sortField, { ascending: sortOrder === 'asc' });
 
@@ -101,7 +101,7 @@ export function ProductList({ onEdit, onDelete }: ProductListProps) {
       const searchMatch = 
         product.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
         product.model_no.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        product.manufacturer_details?.factory_name.toLowerCase().includes(searchTerm.toLowerCase());
+        product.manufacturer?.factory_name.toLowerCase().includes(searchTerm.toLowerCase());
       
       const manufacturerMatch = 
         !selectedManufacturer || 
