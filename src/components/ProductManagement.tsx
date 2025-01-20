@@ -112,7 +112,7 @@ export function ProductManagement() {
 
   const getProductImage = (modelNo: string) => {
     try {
-      return `/public/images/${modelNo}.png`;
+      return `/images/${modelNo}.png`;
     } catch {
       return null;
     }
