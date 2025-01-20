@@ -9,6 +9,7 @@ import { DashboardShell } from '@/components/DashboardShell';
 import { ProductManagement } from '@/components/ProductManagement';
 import { CustomerManagement } from '@/components/CustomerManagement';
 import { BookingManagement } from '@/components/BookingManagement';
+import { ManufacturerManagement } from '@/components/ManufacturerManagement';
 import { Auth } from '@/components/Auth';
 import { supabase } from '@/lib/supabase';
 import type { Database } from '@/lib/database.types';
@@ -60,7 +61,6 @@ export default function App() {
             if (product.available_stock <= 0) {
               acc.outOfStock++;
             }
-            // Assuming each product has an average value of $100
             acc.totalValue += product.total_stock * 100;
             return acc;
           },
@@ -73,7 +73,6 @@ export default function App() {
     if (session) {
       fetchDashboardStats();
 
-      // Subscribe to changes
       const subscription = supabase
         .channel('products_changes')
         .on('postgres_changes', { event: '*', schema: 'public', table: 'products' }, () => {
@@ -98,6 +97,7 @@ export default function App() {
         <TabsList>
           <TabsTrigger value="dashboard">Dashboard</TabsTrigger>
           <TabsTrigger value="products">Products</TabsTrigger>
+          <TabsTrigger value="manufacturers">Manufacturers</TabsTrigger>
           <TabsTrigger value="customers">Customers</TabsTrigger>
           <TabsTrigger value="bookings">Bookings</TabsTrigger>
         </TabsList>
@@ -150,6 +150,10 @@ export default function App() {
 
         <TabsContent value="products">
           <ProductManagement />
+        </TabsContent>
+
+        <TabsContent value="manufacturers">
+          <ManufacturerManagement />
         </TabsContent>
 
         <TabsContent value="customers">
