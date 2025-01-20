@@ -17,7 +17,7 @@ import type { Database } from '@/lib/database.types';
 type DashboardStats = {
   totalProducts: number;
   lowStockItems: number;
-  totalValue: number;
+  totalBookings: number;
   outOfStock: number;
 };
 
@@ -27,7 +27,7 @@ export default function App() {
   const [stats, setStats] = useState<DashboardStats>({
     totalProducts: 0,
     lowStockItems: 0,
-    totalValue: 0,
+    totalBookings: 0,
     outOfStock: 0,
   });
 
@@ -51,6 +51,10 @@ export default function App() {
         .from('products')
         .select('*');
 
+      const { data: bookings } = await supabase
+        .from('bookings')
+        .select('*');
+
       if (products) {
         const stats = products.reduce(
           (acc, product) => {
@@ -61,10 +65,9 @@ export default function App() {
             if (product.available_stock <= 0) {
               acc.outOfStock++;
             }
-            acc.totalValue += product.total_stock * 100;
             return acc;
           },
-          { totalProducts: 0, lowStockItems: 0, totalValue: 0, outOfStock: 0 }
+          { totalProducts: 0, lowStockItems: 0, totalBookings: bookings?.length || 0, outOfStock: 0 }
         );
         setStats(stats);
       }
@@ -74,8 +77,11 @@ export default function App() {
       fetchDashboardStats();
 
       const subscription = supabase
-        .channel('products_changes')
+        .channel('any_changes')
         .on('postgres_changes', { event: '*', schema: 'public', table: 'products' }, () => {
+          fetchDashboardStats();
+        })
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'bookings' }, () => {
           fetchDashboardStats();
         })
         .subscribe();
@@ -117,9 +123,9 @@ export default function App() {
               className="border-l-4 border-l-warning"
             />
             <StatCard
-              title="Total Value"
-              value={`$${stats.totalValue.toLocaleString()}`}
-              change="Estimated inventory value"
+              title="Total Bookings"
+              value={stats.totalBookings.toString()}
+              change="Total number of bookings"
               className="border-l-4 border-l-success"
             />
             <StatCard

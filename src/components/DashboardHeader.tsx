@@ -1,5 +1,6 @@
-import { Bell, Settings, LogOut } from 'lucide-react';
+import { Settings, LogOut } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { NotificationDialog } from '@/components/NotificationDialog';
 import { supabase } from '@/lib/supabase';
 
 interface DashboardHeaderProps {
@@ -20,9 +21,7 @@ export function DashboardHeader({ session }: DashboardHeaderProps) {
         </p>
       </div>
       <div className="flex gap-2">
-        <Button variant="outline" size="icon">
-          <Bell className="h-4 w-4" />
-        </Button>
+        <NotificationDialog />
         <Button variant="outline" size="icon">
           <Settings className="h-4 w-4" />
         </Button>

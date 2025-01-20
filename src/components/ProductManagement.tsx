@@ -5,6 +5,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { ProductList } from './products/ProductList';
 import { ProductForm } from './products/ProductForm';
 import { supabase } from '@/lib/supabase';
+import { logActivity } from '@/lib/activity-logger';
 import Papa from 'papaparse';
 import type { Database } from '@/lib/database.types';
 
@@ -26,7 +27,7 @@ export function ProductManagement() {
     if (data) setManufacturers(data);
   };
 
-  const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file) {
       Papa.parse(file, {
@@ -43,8 +44,20 @@ export function ProductManagement() {
             dead_stock: parseInt(row[8]),
           }));
 
-          const { error } = await supabase.from('products').insert(products);
-          if (error) console.error('Error importing products:', error);
+          const { data: newProducts, error } = await supabase
+            .from('products')
+            .insert(products)
+            .select();
+
+          if (!error && newProducts) {
+            await logActivity({
+              action_type: 'create',
+              entity_type: 'products',
+              entity_id: newProducts[0].id,
+              description: `Imported ${newProducts.length} products via CSV`,
+              metadata: { products: newProducts }
+            });
+          }
         },
         header: true,
       });
@@ -54,18 +67,51 @@ export function ProductManagement() {
   const handleSubmit = async (data: Partial<Product>) => {
     try {
       if (editingProduct) {
-        const { error } = await supabase
+        const { data: updatedProduct, error } = await supabase
           .from('products')
           .update(data)
-          .eq('id', editingProduct.id);
+          .eq('id', editingProduct.id)
+          .select()
+          .single();
         
-        if (!error) {
+        if (!error && updatedProduct) {
+          await logActivity({
+            action_type: 'update',
+            entity_type: 'product',
+            entity_id: editingProduct.id,
+            description: `Updated product ${updatedProduct.name} (${updatedProduct.model_no})`,
+            metadata: {
+              before: editingProduct,
+              after: updatedProduct,
+              changes: Object.entries(data).reduce((acc, [key, value]) => {
+                if (editingProduct[key as keyof Product] !== value) {
+                  acc[key] = {
+                    from: editingProduct[key as keyof Product],
+                    to: value
+                  };
+                }
+                return acc;
+              }, {} as Record<string, any>)
+            }
+          });
           setIsDialogOpen(false);
           setEditingProduct(null);
         }
       } else {
-        const { error } = await supabase.from('products').insert([data]);
-        if (!error) {
+        const { data: newProduct, error } = await supabase
+          .from('products')
+          .insert([data])
+          .select()
+          .single();
+
+        if (!error && newProduct) {
+          await logActivity({
+            action_type: 'create',
+            entity_type: 'product',
+            entity_id: newProduct.id,
+            description: `Created new product ${newProduct.name} (${newProduct.model_no})`,
+            metadata: newProduct
+          });
           setIsDialogOpen(false);
         }
       }
@@ -80,8 +126,22 @@ export function ProductManagement() {
   };
 
   const handleDelete = async (id: string) => {
-    const { error } = await supabase.from('products').delete().eq('id', id);
-    if (error) console.error('Error deleting product:', error);
+    const { data: deletedProduct, error } = await supabase
+      .from('products')
+      .delete()
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (!error && deletedProduct) {
+      await logActivity({
+        action_type: 'delete',
+        entity_type: 'product',
+        entity_id: id,
+        description: `Deleted product ${deletedProduct.name} (${deletedProduct.model_no})`,
+        metadata: deletedProduct
+      });
+    }
   };
 
   return (
