@@ -175,7 +175,7 @@ export function ManufacturerManagement() {
               <div className="flex flex-col space-y-4">
                 <div className="flex items-start justify-between">
                   <div className="flex items-center space-x-4">
-                    <Avatar className={`h-12 w-12 ${getAvatarColor(manufacturer.factory_name)}`}>
+                    <Avatar className={`h-12 w-12 items-center justify-center ${getAvatarColor(manufacturer.factory_name)}`}>
                       <span className="text-lg font-semibold">
                         {getInitials(manufacturer.factory_name)}
                       </span>
