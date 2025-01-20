@@ -36,7 +36,6 @@ export function Overview() {
 
     fetchMonthlyData();
 
-    // Subscribe to changes
     const subscription = supabase
       .channel('products_changes')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'products' }, () => {
@@ -60,6 +59,7 @@ export function Overview() {
             tickLine={false} 
             axisLine={false} 
             padding={{ left: 10, right: 10 }}
+            style={{ fontSize: '12px', fill: '#888888' }}
           />
           <YAxis 
             stroke="#888888" 
@@ -68,6 +68,7 @@ export function Overview() {
             axisLine={false} 
             tickFormatter={(value) => `${value}`}
             width={40}
+            style={{ fontSize: '12px', fill: '#888888' }}
           />
           <Tooltip 
             contentStyle={{ 
