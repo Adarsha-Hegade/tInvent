@@ -22,9 +22,7 @@ interface ActivityLog {
   description: string;
   metadata: any;
   created_at: string;
-  user?: {
-    email: string;
-  };
+  user_email?: string;
 }
 
 export function NotificationDialog() {
@@ -33,19 +31,51 @@ export function NotificationDialog() {
   const [isOpen, setIsOpen] = useState(false);
 
   const fetchLogs = async () => {
-    const { data } = await supabase
+    // First, get the activity logs
+    const { data: logsData, error: logsError } = await supabase
       .from('activity_logs')
-      .select(`
-        *,
-        user:user_id(email)
-      `)
+      .select('*')
       .order('created_at', { ascending: false })
       .limit(50);
 
-    if (data) {
-      setLogs(data);
-      // In a real app, you'd track read status per user
-      setUnreadCount(data.length);
+    if (logsError) {
+      console.error('Error fetching logs:', logsError);
+      return;
+    }
+
+    if (logsData) {
+      // Then, get the user emails for each unique user_id
+      const userIds = [...new Set(logsData.map(log => log.user_id))];
+      
+      // Get emails directly from auth.users
+      const { data: usersData, error: usersError } = await supabase.auth.admin.listUsers({
+        perPage: userIds.length,
+        page: 1,
+        filters: {
+          id: {
+            in: userIds
+          }
+        }
+      });
+
+      if (usersError) {
+        console.error('Error fetching users:', usersError);
+      }
+
+      // Create a map of user_id to email
+      const userMap = (usersData?.users || []).reduce((acc, user) => {
+        acc[user.id] = user.email;
+        return acc;
+      }, {} as Record<string, string>);
+
+      // Combine the logs with user emails
+      const logsWithUsers = logsData.map(log => ({
+        ...log,
+        user_email: userMap[log.user_id] || 'Unknown User'
+      }));
+
+      setLogs(logsWithUsers);
+      setUnreadCount(logsWithUsers.length);
     }
   };
 
@@ -77,6 +107,38 @@ export function NotificationDialog() {
     }
   };
 
+  const formatMetadata = (metadata: any) => {
+    if (!metadata) return null;
+
+    if (metadata.changes) {
+      return (
+        <div className="mt-2 text-sm">
+          <strong>Changes:</strong>
+          <pre className="mt-1 p-2 bg-gray-50 rounded-md overflow-x-auto">
+            {metadata.changes}
+          </pre>
+        </div>
+      );
+    }
+
+    if (metadata.items) {
+      return (
+        <div className="mt-2 text-sm">
+          <strong>Items:</strong>
+          <ul className="mt-1 list-disc list-inside">
+            {metadata.items.map((item: any, index: number) => (
+              <li key={index}>
+                {item.quantity}x {item.product?.name}
+              </li>
+            ))}
+          </ul>
+        </div>
+      );
+    }
+
+    return null;
+  };
+
   return (
     <Dialog open={isOpen} onOpenChange={setIsOpen}>
       <DialogTrigger asChild>
@@ -105,18 +167,14 @@ export function NotificationDialog() {
                     <Badge variant="outline" className={getActionColor(log.action_type)}>
                       {log.action_type}
                     </Badge>
-                    <span className="text-sm font-medium">{log.user?.email}</span>
+                    <span className="text-sm font-medium">{log.user_email}</span>
                   </div>
                   <span className="text-xs text-muted-foreground">
                     {formatDistanceToNow(new Date(log.created_at), { addSuffix: true })}
                   </span>
                 </div>
                 <p className="text-sm">{log.description}</p>
-                {log.metadata && (
-                  <pre className="text-xs bg-muted/50 p-2 rounded-md overflow-x-auto">
-                    {JSON.stringify(log.metadata, null, 2)}
-                  </pre>
-                )}
+                {formatMetadata(log.metadata)}
               </div>
             ))}
           </div>
