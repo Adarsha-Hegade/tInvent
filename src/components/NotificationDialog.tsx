@@ -22,16 +22,24 @@ interface ActivityLog {
   description: string;
   metadata: any;
   created_at: string;
-  user_email?: string;
 }
 
 export function NotificationDialog() {
   const [logs, setLogs] = useState<ActivityLog[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [isOpen, setIsOpen] = useState(false);
+  const [userEmail, setUserEmail] = useState<string | null>(null);
+
+  useEffect(() => {
+    // Get current user's email
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      if (user) {
+        setUserEmail(user.email);
+      }
+    });
+  }, []);
 
   const fetchLogs = async () => {
-    // First, get the activity logs
     const { data: logsData, error: logsError } = await supabase
       .from('activity_logs')
       .select('*')
@@ -44,38 +52,8 @@ export function NotificationDialog() {
     }
 
     if (logsData) {
-      // Then, get the user emails for each unique user_id
-      const userIds = [...new Set(logsData.map(log => log.user_id))];
-      
-      // Get emails directly from auth.users
-      const { data: usersData, error: usersError } = await supabase.auth.admin.listUsers({
-        perPage: userIds.length,
-        page: 1,
-        filters: {
-          id: {
-            in: userIds
-          }
-        }
-      });
-
-      if (usersError) {
-        console.error('Error fetching users:', usersError);
-      }
-
-      // Create a map of user_id to email
-      const userMap = (usersData?.users || []).reduce((acc, user) => {
-        acc[user.id] = user.email;
-        return acc;
-      }, {} as Record<string, string>);
-
-      // Combine the logs with user emails
-      const logsWithUsers = logsData.map(log => ({
-        ...log,
-        user_email: userMap[log.user_id] || 'Unknown User'
-      }));
-
-      setLogs(logsWithUsers);
-      setUnreadCount(logsWithUsers.length);
+      setLogs(logsData);
+      setUnreadCount(logsData.length);
     }
   };
 
@@ -115,7 +93,7 @@ export function NotificationDialog() {
         <div className="mt-2 text-sm">
           <strong>Changes:</strong>
           <pre className="mt-1 p-2 bg-gray-50 rounded-md overflow-x-auto">
-            {metadata.changes}
+            {JSON.stringify(metadata.changes, null, 2)}
           </pre>
         </div>
       );
@@ -128,7 +106,7 @@ export function NotificationDialog() {
           <ul className="mt-1 list-disc list-inside">
             {metadata.items.map((item: any, index: number) => (
               <li key={index}>
-                {item.quantity}x {item.product?.name}
+                {item.quantity}x {item.product?.name || item.product_id}
               </li>
             ))}
           </ul>
@@ -167,7 +145,9 @@ export function NotificationDialog() {
                     <Badge variant="outline" className={getActionColor(log.action_type)}>
                       {log.action_type}
                     </Badge>
-                    <span className="text-sm font-medium">{log.user_email}</span>
+                    <span className="text-sm font-medium">
+                      {log.user_id === userEmail ? 'You' : 'Another user'}
+                    </span>
                   </div>
                   <span className="text-xs text-muted-foreground">
                     {formatDistanceToNow(new Date(log.created_at), { addSuffix: true })}
