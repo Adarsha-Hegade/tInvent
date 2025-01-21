@@ -7,6 +7,7 @@ import { BookingCard } from './bookings/BookingCard';
 import { BookingDetails } from './bookings/BookingDetails';
 import { supabase } from '@/lib/supabase';
 import { logActivity } from '@/lib/activity-logger';
+import { toast } from 'sonner';
 import type { Database } from '@/lib/database.types';
 
 type Booking = Database['public']['Tables']['bookings']['Row'];
@@ -33,11 +34,16 @@ export function BookingManagement() {
   const [editingBooking, setEditingBooking] = useState<(Booking & { items: BookingItem[] }) | null>(null);
   const [selectedCustomer, setSelectedCustomer] = useState<GroupedBooking | null>(null);
   const [validationError, setValidationError] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    loadBookings();
-    loadProducts();
-    loadCustomers();
+    Promise.all([
+      loadBookings(),
+      loadProducts(),
+      loadCustomers()
+    ]).finally(() => {
+      setIsLoading(false);
+    });
   }, []);
 
   const loadBookings = async () => {
@@ -55,6 +61,7 @@ export function BookingManagement() {
 
     if (error) {
       console.error('Error loading bookings:', error);
+      toast.error('Failed to load bookings');
       return;
     }
 
@@ -84,13 +91,37 @@ export function BookingManagement() {
   };
 
   const loadProducts = async () => {
-    const { data } = await supabase.from('products').select('*');
-    if (data) setProducts(data);
+    const { data, error } = await supabase
+      .from('products')
+      .select('*')
+      .order('name');
+
+    if (error) {
+      console.error('Error loading products:', error);
+      toast.error('Failed to load products');
+      return;
+    }
+
+    if (data) {
+      setProducts(data);
+    }
   };
 
   const loadCustomers = async () => {
-    const { data } = await supabase.from('customers').select('*');
-    if (data) setCustomers(data);
+    const { data, error } = await supabase
+      .from('customers')
+      .select('*')
+      .order('name');
+
+    if (error) {
+      console.error('Error loading customers:', error);
+      toast.error('Failed to load customers');
+      return;
+    }
+
+    if (data) {
+      setCustomers(data);
+    }
   };
 
   const checkOverbooked = (items: BookingItem[]): { isOverbooked: boolean; overbooked: string[] } => {
@@ -139,7 +170,12 @@ export function BookingManagement() {
             await loadBookings();
             setIsAddDialogOpen(false);
             setEditingBooking(null);
+            toast.success('Booking updated successfully');
+          } else {
+            toast.error('Failed to update booking items');
           }
+        } else {
+          toast.error('Failed to update booking');
         }
       } else {
         const { data: newBooking, error: bookingError } = await supabase
@@ -165,11 +201,17 @@ export function BookingManagement() {
           if (!itemsError) {
             await loadBookings();
             setIsAddDialogOpen(false);
+            toast.success('Booking created successfully');
+          } else {
+            toast.error('Failed to create booking items');
           }
+        } else {
+          toast.error('Failed to create booking');
         }
       }
     } catch (error) {
       console.error('Error saving booking:', error);
+      toast.error('An error occurred while saving the booking');
     }
   };
 
@@ -182,8 +224,19 @@ export function BookingManagement() {
     const { error } = await supabase.from('bookings').delete().eq('id', id);
     if (!error) {
       loadBookings();
+      toast.success('Booking deleted successfully');
+    } else {
+      toast.error('Failed to delete booking');
     }
   };
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="text-lg text-muted-foreground">Loading...</div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">

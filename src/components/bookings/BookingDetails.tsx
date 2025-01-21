@@ -2,6 +2,17 @@ import { Pencil, Trash2, ChevronLeft, Package2, Calendar, Mail, Phone, MapPin } 
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import { toast } from 'sonner';
 import type { Database } from '@/lib/database.types';
 
 type Booking = Database['public']['Tables']['bookings']['Row'];
@@ -48,6 +59,11 @@ export function BookingDetails({ groupedBooking, onBack, onEdit, onDelete }: Boo
       default:
         return 'destructive';
     }
+  };
+
+  const handleDelete = (id: string) => {
+    onDelete(id);
+    toast.success('Booking deleted successfully');
   };
 
   return (
@@ -114,9 +130,27 @@ export function BookingDetails({ groupedBooking, onBack, onEdit, onDelete }: Boo
                         <Button variant="ghost" size="icon" onClick={() => onEdit(booking)}>
                           <Pencil className="w-4 h-4" />
                         </Button>
-                        <Button variant="ghost" size="icon" onClick={() => onDelete(booking.id)}>
-                          <Trash2 className="w-4 h-4" />
-                        </Button>
+                        <AlertDialog>
+                          <AlertDialogTrigger asChild>
+                            <Button variant="ghost" size="icon">
+                              <Trash2 className="w-4 h-4" />
+                            </Button>
+                          </AlertDialogTrigger>
+                          <AlertDialogContent>
+                            <AlertDialogHeader>
+                              <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+                              <AlertDialogDescription>
+                                This will permanently delete this booking. This action cannot be undone.
+                              </AlertDialogDescription>
+                            </AlertDialogHeader>
+                            <AlertDialogFooter>
+                              <AlertDialogCancel>Cancel</AlertDialogCancel>
+                              <AlertDialogAction onClick={() => handleDelete(booking.id)}>
+                                Delete
+                              </AlertDialogAction>
+                            </AlertDialogFooter>
+                          </AlertDialogContent>
+                        </AlertDialog>
                       </div>
                     </div>
 

@@ -1,9 +1,12 @@
 import { useState, useEffect } from 'react';
 import { useForm } from 'react-hook-form';
-import { Plus, X } from 'lucide-react';
+import { Plus, X, Search } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem } from '@/components/ui/command';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { cn } from '@/lib/utils';
 import type { Database } from '@/lib/database.types';
 
 type Product = Database['public']['Tables']['products']['Row'];
@@ -35,6 +38,8 @@ export function BookingForm({ customers, products, onSubmit, initialData, onCanc
   const [customerName, setCustomerName] = useState('');
   const [customerEmail, setCustomerEmail] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
+  const [openProductPickers, setOpenProductPickers] = useState<{ [key: number]: boolean }>({});
+  const [searchQueries, setSearchQueries] = useState<{ [key: number]: string }>({});
 
   const { register, handleSubmit, watch, setValue } = useForm<BookingFormData>({
     defaultValues: initialData || {
@@ -51,12 +56,30 @@ export function BookingForm({ customers, products, onSubmit, initialData, onCanc
   const removeItem = (index: number) => {
     const currentItems = watch('items') || [];
     setValue('items', currentItems.filter((_, i) => i !== index));
+    
+    // Clean up search state for removed item
+    const newSearchQueries = { ...searchQueries };
+    delete newSearchQueries[index];
+    setSearchQueries(newSearchQueries);
+    
+    const newOpenPickers = { ...openProductPickers };
+    delete newOpenPickers[index];
+    setOpenProductPickers(newOpenPickers);
   };
 
-  const handleProductSelect = (value: string, index: number) => {
+  const handleProductSelect = (productId: string, index: number) => {
     const items = watch('items');
-    items[index].product_id = value;
-    setValue('items', [...items]); // Create a new array to trigger re-render
+    items[index].product_id = productId;
+    setValue('items', [...items]);
+    setOpenProductPickers({ ...openProductPickers, [index]: false });
+  };
+
+  const filteredProducts = (index: number) => {
+    const query = searchQueries[index]?.toLowerCase() || '';
+    return products.filter(product => 
+      product.name.toLowerCase().includes(query) ||
+      product.model_no.toLowerCase().includes(query)
+    );
   };
 
   return (
@@ -156,21 +179,53 @@ export function BookingForm({ customers, products, onSubmit, initialData, onCanc
           {watch('items')?.map((item, index) => (
             <div key={index} className="flex gap-4 items-start">
               <div className="flex-1">
-                <Select
-                  value={item.product_id}
-                  onValueChange={(value) => handleProductSelect(value, index)}
+                <Popover
+                  open={openProductPickers[index]}
+                  onOpenChange={(open) => 
+                    setOpenProductPickers({ ...openProductPickers, [index]: open })
+                  }
                 >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select product" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {products.map((product) => (
-                      <SelectItem key={product.id} value={product.id}>
-                        {product.name} (Available: {product.available_stock})
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                  <PopoverTrigger asChild>
+                    <Button
+                      variant="outline"
+                      role="combobox"
+                      className={cn(
+                        "w-full justify-between",
+                        !item.product_id && "text-muted-foreground"
+                      )}
+                    >
+                      {item.product_id
+                        ? products.find((product) => product.id === item.product_id)?.name
+                        : "Select product..."}
+                      <Search className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-[400px] p-0">
+                    <Command>
+                      <CommandInput 
+                        placeholder="Search products..."
+                        value={searchQueries[index] || ''}
+                        onValueChange={(search) => 
+                          setSearchQueries({ ...searchQueries, [index]: search })
+                        }
+                      />
+                      <CommandEmpty>No products found.</CommandEmpty>
+                      <CommandGroup>
+                        {filteredProducts(index).map((product) => (
+                          <CommandItem
+                            key={product.id}
+                            onSelect={() => handleProductSelect(product.id, index)}
+                          >
+                            <span>{product.name}</span>
+                            <span className="ml-2 text-sm text-muted-foreground">
+                              (Available: {product.available_stock})
+                            </span>
+                          </CommandItem>
+                        ))}
+                      </CommandGroup>
+                    </Command>
+                  </PopoverContent>
+                </Popover>
               </div>
               <div className="w-32">
                 <Input
@@ -181,7 +236,7 @@ export function BookingForm({ customers, products, onSubmit, initialData, onCanc
                   onChange={(e) => {
                     const items = watch('items');
                     items[index].quantity = parseInt(e.target.value) || 1;
-                    setValue('items', [...items]); // Create a new array to trigger re-render
+                    setValue('items', [...items]);
                   }}
                   required
                 />
