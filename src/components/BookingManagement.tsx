@@ -1,7 +1,9 @@
 import { useState, useEffect } from 'react';
-import { Plus } from 'lucide-react';
+import { Plus, Search } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { BookingForm } from './bookings/BookingForm';
 import { BookingCard } from './bookings/BookingCard';
 import { BookingDetails } from './bookings/BookingDetails';
@@ -26,6 +28,8 @@ interface GroupedBooking {
   bookings: (Booking & { items: BookingItem[] })[];
 }
 
+type BookingStatus = 'all' | 'pending' | 'advance_paid' | 'full_paid' | 'overbooked';
+
 export function BookingManagement() {
   const [groupedBookings, setGroupedBookings] = useState<GroupedBooking[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
@@ -33,9 +37,10 @@ export function BookingManagement() {
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [editingBooking, setEditingBooking] = useState<(Booking & { items: BookingItem[] }) | null>(null);
   const [selectedCustomer, setSelectedCustomer] = useState<GroupedBooking | null>(null);
-  const [validationError, setValidationError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [statusFilter, setStatusFilter] = useState<BookingStatus>('all');
 
   useEffect(() => {
     Promise.all([
@@ -46,7 +51,6 @@ export function BookingManagement() {
       setIsLoading(false);
     });
 
-    // Subscribe to real-time updates
     const subscription = supabase
       .channel('booking_changes')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'bookings' }, () => {
@@ -140,43 +144,9 @@ export function BookingManagement() {
     }
   };
 
-  const validateBooking = (items: BookingItem[]): { isValid: boolean; message?: string } => {
-    for (const item of items) {
-      const product = products.find(p => p.id === item.product_id);
-      if (!product) {
-        return { isValid: false, message: 'Invalid product selected' };
-      }
-      
-      // For updates, we need to consider the current booking's quantities
-      let currentBookedQuantity = 0;
-      if (editingBooking) {
-        const existingItem = editingBooking.items.find(i => i.product_id === item.product_id);
-        if (existingItem) {
-          currentBookedQuantity = existingItem.quantity;
-        }
-      }
-
-      const availableStock = product.available_stock + currentBookedQuantity;
-      if (item.quantity > availableStock) {
-        return {
-          isValid: false,
-          message: `Not enough stock for ${product.name}. Available: ${availableStock}, Requested: ${item.quantity}`
-        };
-      }
-    }
-    return { isValid: true };
-  };
-
   const handleSubmit = async (data: any) => {
     try {
       setIsSubmitting(true);
-      setValidationError(null);
-
-      const validation = validateBooking(data.items);
-      if (!validation.isValid) {
-        setValidationError(validation.message || 'Invalid booking data');
-        return;
-      }
 
       if (editingBooking) {
         // Update existing booking
@@ -296,6 +266,34 @@ export function BookingManagement() {
     }
   };
 
+  const filteredGroupedBookings = groupedBookings.filter(groupedBooking => {
+    // Search filter
+    const searchMatch = searchTerm.toLowerCase().trim() === '' || (
+      groupedBooking.customer.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (groupedBooking.customer.email?.toLowerCase().includes(searchTerm.toLowerCase())) ||
+      (groupedBooking.customer.phone?.toLowerCase().includes(searchTerm.toLowerCase())) ||
+      groupedBooking.bookings.some(booking => 
+        booking.items.some(item => 
+          item.product?.name.toLowerCase().includes(searchTerm.toLowerCase())
+        )
+      )
+    );
+
+    // Status filter
+    const statusMatch = statusFilter === 'all' || (
+      statusFilter === 'overbooked' 
+        ? groupedBooking.bookings.some(booking => 
+            booking.items.some(item => {
+              const product = products.find(p => p.id === item.product_id);
+              return product && item.quantity > product.available_stock;
+            })
+          )
+        : groupedBooking.bookings.some(booking => booking.status === statusFilter)
+    );
+
+    return searchMatch && statusMatch;
+  });
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -319,11 +317,6 @@ export function BookingManagement() {
             <DialogHeader>
               <DialogTitle>{editingBooking ? 'Edit Booking' : 'Add New Booking'}</DialogTitle>
             </DialogHeader>
-            {validationError && (
-              <div className="bg-destructive/10 text-destructive text-sm p-3 rounded-md">
-                {validationError}
-              </div>
-            )}
             <BookingForm
               customers={customers}
               products={products}
@@ -336,12 +329,35 @@ export function BookingManagement() {
               onCancel={() => {
                 setIsAddDialogOpen(false);
                 setEditingBooking(null);
-                setValidationError(null);
               }}
               isSubmitting={isSubmitting}
             />
           </DialogContent>
         </Dialog>
+      </div>
+
+      <div className="flex gap-4 items-center">
+        <div className="relative flex-1">
+          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            placeholder="Search by customer name, email, phone or product..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="pl-10"
+          />
+        </div>
+        <Select value={statusFilter} onValueChange={(value) => setStatusFilter(value as BookingStatus)}>
+          <SelectTrigger className="w-[180px]">
+            <SelectValue placeholder="Filter by status" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Bookings</SelectItem>
+            <SelectItem value="pending">Pending</SelectItem>
+            <SelectItem value="advance_paid">Advance Paid</SelectItem>
+            <SelectItem value="full_paid">Full Paid</SelectItem>
+            <SelectItem value="overbooked">Overbooked</SelectItem>
+          </SelectContent>
+        </Select>
       </div>
 
       {selectedCustomer ? (
@@ -353,11 +369,12 @@ export function BookingManagement() {
         />
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {groupedBookings.map((groupedBooking) => (
+          {filteredGroupedBookings.map((groupedBooking) => (
             <BookingCard
               key={groupedBooking.customer.id}
               groupedBooking={groupedBooking}
               onSelect={setSelectedCustomer}
+              products={products}
             />
           ))}
         </div>

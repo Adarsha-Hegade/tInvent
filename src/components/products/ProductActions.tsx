@@ -7,7 +7,7 @@ type Product = Database['public']['Tables']['products']['Row'];
 interface ProductActionsProps {
   product: Product;
   onEdit: (product: Product) => void;
-  onDelete: (id: string) => void;
+  onDelete: (product: Product) => void;
 }
 
 export function ProductActions({ product, onEdit, onDelete }: ProductActionsProps) {
@@ -16,7 +16,12 @@ export function ProductActions({ product, onEdit, onDelete }: ProductActionsProp
       <Button variant="ghost" size="icon" onClick={() => onEdit(product)}>
         <Edit className="w-4 h-4" />
       </Button>
-      <Button variant="ghost" size="icon" onClick={() => onDelete(product.id)}>
+      <Button 
+        variant="ghost" 
+        size="icon" 
+        onClick={() => onDelete(product)}
+        className="hover:bg-destructive/10 hover:text-destructive"
+      >
         <Trash2 className="w-4 h-4" />
       </Button>
     </div>

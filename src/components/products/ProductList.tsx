@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { Search, ChevronUp, ChevronDown } from 'lucide-react';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
@@ -6,7 +6,6 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { ProductImage } from './ProductImage';
 import { ProductActions } from './ProductActions';
-import { supabase } from '@/lib/supabase';
 import type { Database } from '@/lib/database.types';
 
 type Product = Database['public']['Tables']['products']['Row'] & {
@@ -17,55 +16,19 @@ type SortField = 'name' | 'total_stock' | 'available_stock' | 'bad_stock' | 'dea
 type SortOrder = 'asc' | 'desc';
 
 interface ProductListProps {
+  products: Product[];
   onEdit: (product: Product) => void;
-  onDelete: (id: string) => void;
+  onDelete: (product: Product) => void;
 }
 
-export function ProductList({ onEdit, onDelete }: ProductListProps) {
-  const [products, setProducts] = useState<Product[]>([]);
-  const [manufacturers, setManufacturers] = useState<Database['public']['Tables']['manufacturers']['Row'][]>([]);
+export function ProductList({ products, onEdit, onDelete }: ProductListProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedManufacturer, setSelectedManufacturer] = useState<string | null>(null);
   const [sortField, setSortField] = useState<SortField>('name');
   const [sortOrder, setSortOrder] = useState<SortOrder>('asc');
   const [hoveredProduct, setHoveredProduct] = useState<string | null>(null);
 
-  useEffect(() => {
-    loadProducts();
-    loadManufacturers();
-
-    const subscription = supabase
-      .channel('product_changes')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'products' }, loadProducts)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'manufacturers' }, () => {
-        loadProducts();
-        loadManufacturers();
-      })
-      .subscribe();
-
-    return () => {
-      subscription.unsubscribe();
-    };
-  }, [sortField, sortOrder]); // Re-fetch when sort changes
-
-  const loadProducts = async () => {
-    const { data: productsData } = await supabase
-      .from('products')
-      .select(`
-        *,
-        manufacturer:manufacturer_id(*)
-      `)
-      .order(sortField, { ascending: sortOrder === 'asc' });
-
-    if (productsData) {
-      setProducts(productsData);
-    }
-  };
-
-  const loadManufacturers = async () => {
-    const { data } = await supabase.from('manufacturers').select('*');
-    if (data) setManufacturers(data);
-  };
+  const manufacturers = Array.from(new Set(products.map(p => p.manufacturer).filter(Boolean)));
 
   const getStockStatus = (product: Product) => {
     if (product.available_stock <= 0) return { status: 'Out of Stock', variant: 'destructive' as const };
@@ -96,19 +59,30 @@ export function ProductList({ onEdit, onDelete }: ProductListProps) {
     </TableHead>
   );
 
-  const filteredProducts = products
-    .filter(product => {
-      const searchMatch = 
-        product.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        product.model_no.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        product.manufacturer?.factory_name.toLowerCase().includes(searchTerm.toLowerCase());
-      
-      const manufacturerMatch = 
-        !selectedManufacturer || 
-        product.manufacturer_id === selectedManufacturer;
+  const sortedProducts = [...products].sort((a, b) => {
+    const aValue = a[sortField];
+    const bValue = b[sortField];
+    const modifier = sortOrder === 'asc' ? 1 : -1;
+    
+    if (typeof aValue === 'string' && typeof bValue === 'string') {
+      return aValue.localeCompare(bValue) * modifier;
+    }
+    
+    return ((aValue as number) - (bValue as number)) * modifier;
+  });
 
-      return searchMatch && manufacturerMatch;
-    });
+  const filteredProducts = sortedProducts.filter(product => {
+    const searchMatch = 
+      product.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      product.model_no.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      product.manufacturer?.factory_name.toLowerCase().includes(searchTerm.toLowerCase());
+    
+    const manufacturerMatch = 
+      !selectedManufacturer || 
+      product.manufacturer_id === selectedManufacturer;
+
+    return searchMatch && manufacturerMatch;
+  });
 
   const truncateText = (text: string, wordCount: number) => {
     if (!text) return '';
@@ -136,8 +110,8 @@ export function ProductList({ onEdit, onDelete }: ProductListProps) {
           <SelectContent>
             <SelectItem value="all">All Manufacturers</SelectItem>
             {manufacturers.map((manufacturer) => (
-              <SelectItem key={manufacturer.id} value={manufacturer.id}>
-                {manufacturer.factory_name}
+              <SelectItem key={manufacturer?.id} value={manufacturer?.id}>
+                {manufacturer?.factory_name}
               </SelectItem>
             ))}
           </SelectContent>

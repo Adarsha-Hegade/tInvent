@@ -24,9 +24,10 @@ interface GroupedBooking {
 interface BookingCardProps {
   groupedBooking: GroupedBooking;
   onSelect: (groupedBooking: GroupedBooking) => void;
+  products: Product[];
 }
 
-export function BookingCard({ groupedBooking, onSelect }: BookingCardProps) {
+export function BookingCard({ groupedBooking, onSelect, products }: BookingCardProps) {
   const { customer, bookings } = groupedBooking;
   const [showAllBookings, setShowAllBookings] = useState(false);
   const displayedBookings = showAllBookings ? bookings : bookings.slice(0, 2);
@@ -41,6 +42,11 @@ export function BookingCard({ groupedBooking, onSelect }: BookingCardProps) {
       default:
         return 'destructive';
     }
+  };
+
+  const isItemOverbooked = (item: BookingItem) => {
+    const product = products.find(p => p.id === item.product_id);
+    return product && item.quantity > product.available_stock;
   };
 
   return (
@@ -95,12 +101,27 @@ export function BookingCard({ groupedBooking, onSelect }: BookingCardProps) {
                   </div>
                 </div>
                 <div className="space-y-1">
-                  {booking.items.slice(0, 2).map((item, itemIndex) => (
-                    <div key={itemIndex} className="flex items-center justify-between text-sm">
-                      <span>{item.product?.name}</span>
-                      <span className="font-medium">× {item.quantity}</span>
-                    </div>
-                  ))}
+                  {booking.items.slice(0, 2).map((item, itemIndex) => {
+                    const isOverbooked = isItemOverbooked(item);
+                    return (
+                      <div 
+                        key={itemIndex} 
+                        className={`flex items-center justify-between text-sm ${
+                          isOverbooked ? 'bg-destructive/10 text-destructive p-1 rounded' : ''
+                        }`}
+                      >
+                        <span>{item.product?.name}</span>
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium">× {item.quantity}</span>
+                          {isOverbooked && (
+                            <Badge variant="destructive" className="text-xs">
+                              Overbooked
+                            </Badge>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
                   {booking.items.length > 2 && (
                     <div className="text-sm text-muted-foreground">
                       +{booking.items.length - 2} more items

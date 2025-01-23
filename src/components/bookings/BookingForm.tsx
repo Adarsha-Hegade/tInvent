@@ -37,7 +37,6 @@ interface BookingFormProps {
 export function BookingForm({ customers, products, onSubmit, initialData, onCancel, isSubmitting }: BookingFormProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [showProductSearch, setShowProductSearch] = useState(false);
-  const [itemErrors, setItemErrors] = useState<{ [key: number]: string }>({});
 
   const { register, handleSubmit, watch, setValue, formState: { errors } } = useForm<BookingFormData>({
     defaultValues: initialData || {
@@ -49,34 +48,6 @@ export function BookingForm({ customers, products, onSubmit, initialData, onCanc
   const removeItem = (index: number) => {
     const currentItems = watch('items') || [];
     setValue('items', currentItems.filter((_, i) => i !== index));
-    
-    const newItemErrors = { ...itemErrors };
-    delete newItemErrors[index];
-    setItemErrors(newItemErrors);
-  };
-
-  const validateItemQuantity = (index: number, quantity: number, productId: string) => {
-    const product = products.find(p => p.id === productId);
-    if (product) {
-      const available = product.available_stock;
-      if (quantity > available) {
-        setItemErrors({
-          ...itemErrors,
-          [index]: `Only ${available} units available`
-        });
-      } else {
-        const newErrors = { ...itemErrors };
-        delete newErrors[index];
-        setItemErrors(newErrors);
-      }
-    }
-  };
-
-  const handleQuantityChange = (index: number, value: number) => {
-    const items = watch('items');
-    items[index].quantity = value;
-    setValue('items', [...items]);
-    validateItemQuantity(index, value, items[index].product_id);
   };
 
   const addProduct = (product: Product) => {
@@ -86,13 +57,24 @@ export function BookingForm({ customers, products, onSubmit, initialData, onCanc
     if (existingItemIndex >= 0) {
       // Update quantity of existing item
       const newQuantity = currentItems[existingItemIndex].quantity + 1;
-      handleQuantityChange(existingItemIndex, newQuantity);
+      const updatedItems = [...currentItems];
+      updatedItems[existingItemIndex] = {
+        ...updatedItems[existingItemIndex],
+        quantity: newQuantity
+      };
+      setValue('items', updatedItems);
     } else {
       // Add new item
       setValue('items', [...currentItems, { product_id: product.id, quantity: 1, product }]);
     }
     setShowProductSearch(false);
     setSearchQuery('');
+  };
+
+  const handleQuantityChange = (index: number, value: number) => {
+    const items = watch('items');
+    items[index].quantity = value;
+    setValue('items', [...items]);
   };
 
   const filteredProducts = searchQuery.trim().length > 0 
@@ -107,7 +89,10 @@ export function BookingForm({ customers, products, onSubmit, initialData, onCanc
         .slice(0, 5) // Limit to 5 results
     : [];
 
-  const hasErrors = Object.keys(itemErrors).length > 0;
+  const isItemOverbooked = (item: BookingItem) => {
+    const product = products.find(p => p.id === item.product_id);
+    return product && item.quantity > product.available_stock;
+  };
 
   return (
     <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
@@ -206,37 +191,48 @@ export function BookingForm({ customers, products, onSubmit, initialData, onCanc
           )}
 
           <div className="space-y-2">
-            {watch('items')?.map((item, index) => (
-              <div key={index} className="flex gap-4 items-center p-2 bg-muted/50 rounded-md">
-                <div className="flex-1">
-                  <p className="font-medium">{products.find(p => p.id === item.product_id)?.name}</p>
-                  <p className="text-sm text-muted-foreground">
-                    {products.find(p => p.id === item.product_id)?.model_no}
-                  </p>
-                </div>
-                <div className="w-32">
-                  <Input
-                    type="number"
-                    min="1"
-                    placeholder="Quantity"
-                    value={item.quantity}
-                    onChange={(e) => handleQuantityChange(index, parseInt(e.target.value) || 1)}
-                    className={cn(itemErrors[index] && "border-destructive")}
-                  />
-                  {itemErrors[index] && (
-                    <p className="text-xs text-destructive mt-1">{itemErrors[index]}</p>
+            {watch('items')?.map((item, index) => {
+              const isOverbooked = isItemOverbooked(item);
+              return (
+                <div 
+                  key={index} 
+                  className={cn(
+                    "flex gap-4 items-center p-2 rounded-md",
+                    isOverbooked ? "bg-destructive/10" : "bg-muted/50"
                   )}
-                </div>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => removeItem(index)}
                 >
-                  <X className="w-4 h-4" />
-                </Button>
-              </div>
-            ))}
+                  <div className="flex-1">
+                    <p className="font-medium">{products.find(p => p.id === item.product_id)?.name}</p>
+                    <p className="text-sm text-muted-foreground">
+                      {products.find(p => p.id === item.product_id)?.model_no}
+                    </p>
+                    {isOverbooked && (
+                      <p className="text-xs text-destructive mt-1">
+                        Warning: Exceeds available stock ({products.find(p => p.id === item.product_id)?.available_stock} available)
+                      </p>
+                    )}
+                  </div>
+                  <div className="w-32">
+                    <Input
+                      type="number"
+                      min="1"
+                      placeholder="Quantity"
+                      value={item.quantity}
+                      onChange={(e) => handleQuantityChange(index, parseInt(e.target.value) || 1)}
+                      className={cn(isOverbooked && "border-destructive")}
+                    />
+                  </div>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => removeItem(index)}
+                  >
+                    <X className="w-4 h-4" />
+                  </Button>
+                </div>
+              );
+            })}
           </div>
         </div>
       </div>
@@ -245,7 +241,7 @@ export function BookingForm({ customers, products, onSubmit, initialData, onCanc
         <Button 
           type="submit" 
           className="flex-1"
-          disabled={isSubmitting || hasErrors || !watch('items')?.length}
+          disabled={isSubmitting || !watch('items')?.length}
         >
           {isSubmitting ? 'Saving...' : initialData ? 'Update Booking' : 'Add Booking'}
         </Button>
