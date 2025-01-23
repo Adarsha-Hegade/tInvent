@@ -1,11 +1,11 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { Plus, X, Search } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem } from '@/components/ui/command';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Card } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import type { Database } from '@/lib/database.types';
 
@@ -31,128 +31,111 @@ interface BookingFormProps {
   onSubmit: (data: BookingFormData) => Promise<void>;
   initialData?: BookingFormData;
   onCancel?: () => void;
+  isSubmitting?: boolean;
 }
 
-export function BookingForm({ customers, products, onSubmit, initialData, onCancel }: BookingFormProps) {
-  const [isCreatingCustomer, setIsCreatingCustomer] = useState(false);
-  const [customerName, setCustomerName] = useState('');
-  const [customerEmail, setCustomerEmail] = useState('');
-  const [customerPhone, setCustomerPhone] = useState('');
-  const [openProductPickers, setOpenProductPickers] = useState<{ [key: number]: boolean }>({});
-  const [searchQueries, setSearchQueries] = useState<{ [key: number]: string }>({});
+export function BookingForm({ customers, products, onSubmit, initialData, onCancel, isSubmitting }: BookingFormProps) {
+  const [searchQuery, setSearchQuery] = useState('');
+  const [showProductSearch, setShowProductSearch] = useState(false);
+  const [itemErrors, setItemErrors] = useState<{ [key: number]: string }>({});
 
-  const { register, handleSubmit, watch, setValue } = useForm<BookingFormData>({
+  const { register, handleSubmit, watch, setValue, formState: { errors } } = useForm<BookingFormData>({
     defaultValues: initialData || {
       status: 'pending',
-      items: [{ product_id: '', quantity: 1 }]
+      items: []
     }
   });
-
-  const addItem = () => {
-    const currentItems = watch('items') || [];
-    setValue('items', [...currentItems, { product_id: '', quantity: 1 }]);
-  };
 
   const removeItem = (index: number) => {
     const currentItems = watch('items') || [];
     setValue('items', currentItems.filter((_, i) => i !== index));
     
-    // Clean up search state for removed item
-    const newSearchQueries = { ...searchQueries };
-    delete newSearchQueries[index];
-    setSearchQueries(newSearchQueries);
-    
-    const newOpenPickers = { ...openProductPickers };
-    delete newOpenPickers[index];
-    setOpenProductPickers(newOpenPickers);
+    const newItemErrors = { ...itemErrors };
+    delete newItemErrors[index];
+    setItemErrors(newItemErrors);
   };
 
-  const handleProductSelect = (productId: string, index: number) => {
+  const validateItemQuantity = (index: number, quantity: number, productId: string) => {
+    const product = products.find(p => p.id === productId);
+    if (product) {
+      const available = product.available_stock;
+      if (quantity > available) {
+        setItemErrors({
+          ...itemErrors,
+          [index]: `Only ${available} units available`
+        });
+      } else {
+        const newErrors = { ...itemErrors };
+        delete newErrors[index];
+        setItemErrors(newErrors);
+      }
+    }
+  };
+
+  const handleQuantityChange = (index: number, value: number) => {
     const items = watch('items');
-    items[index].product_id = productId;
+    items[index].quantity = value;
     setValue('items', [...items]);
-    setOpenProductPickers({ ...openProductPickers, [index]: false });
+    validateItemQuantity(index, value, items[index].product_id);
   };
 
-  const filteredProducts = (index: number) => {
-    const query = searchQueries[index]?.toLowerCase() || '';
-    return products.filter(product => 
-      product.name.toLowerCase().includes(query) ||
-      product.model_no.toLowerCase().includes(query)
-    );
+  const addProduct = (product: Product) => {
+    const currentItems = watch('items') || [];
+    const existingItemIndex = currentItems.findIndex(item => item.product_id === product.id);
+
+    if (existingItemIndex >= 0) {
+      // Update quantity of existing item
+      const newQuantity = currentItems[existingItemIndex].quantity + 1;
+      handleQuantityChange(existingItemIndex, newQuantity);
+    } else {
+      // Add new item
+      setValue('items', [...currentItems, { product_id: product.id, quantity: 1, product }]);
+    }
+    setShowProductSearch(false);
+    setSearchQuery('');
   };
+
+  const filteredProducts = searchQuery.trim().length > 0 
+    ? products
+        .filter(product => {
+          const query = searchQuery.toLowerCase();
+          return (
+            product.name.toLowerCase().includes(query) ||
+            product.model_no.toLowerCase().includes(query)
+          );
+        })
+        .slice(0, 5) // Limit to 5 results
+    : [];
+
+  const hasErrors = Object.keys(itemErrors).length > 0;
 
   return (
     <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
       <div className="space-y-4">
         <div className="space-y-2">
-          <label>Customer</label>
-          {isCreatingCustomer ? (
-            <div className="space-y-4">
-              <Input
-                placeholder="Customer Name"
-                value={customerName}
-                onChange={(e) => setCustomerName(e.target.value)}
-                required
-              />
-              <Input
-                type="email"
-                placeholder="Email (optional)"
-                value={customerEmail}
-                onChange={(e) => setCustomerEmail(e.target.value)}
-              />
-              <Input
-                placeholder="Phone (optional)"
-                value={customerPhone}
-                onChange={(e) => setCustomerPhone(e.target.value)}
-              />
-              <div className="flex gap-2">
-                <Button
-                  type="button"
-                  disabled={!customerName}
-                  className="flex-1"
-                >
-                  Create Customer
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => setIsCreatingCustomer(false)}
-                >
-                  Cancel
-                </Button>
-              </div>
-            </div>
-          ) : (
-            <div className="flex gap-2">
-              <Select 
-                value={watch('customer_id')}
-                onValueChange={(value) => setValue('customer_id', value)}
-              >
-                <SelectTrigger className="flex-1">
-                  <SelectValue placeholder="Select customer" />
-                </SelectTrigger>
-                <SelectContent>
-                  {customers.map((customer) => (
-                    <SelectItem key={customer.id} value={customer.id}>
-                      {customer.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setIsCreatingCustomer(true)}
-              >
-                New Customer
-              </Button>
-            </div>
+          <label className="text-sm font-medium">Customer</label>
+          <Select 
+            value={watch('customer_id')}
+            onValueChange={(value) => setValue('customer_id', value)}
+          >
+            <SelectTrigger>
+              <SelectValue placeholder="Select customer" />
+            </SelectTrigger>
+            <SelectContent>
+              {customers.map((customer) => (
+                <SelectItem key={customer.id} value={customer.id}>
+                  {customer.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {errors.customer_id && (
+            <p className="text-sm text-destructive">Please select a customer</p>
           )}
         </div>
 
         <div className="space-y-2">
-          <label>Status</label>
+          <label className="text-sm font-medium">Status</label>
           <Select 
             value={watch('status')}
             onValueChange={(value) => setValue('status', value as 'pending' | 'advance_paid' | 'full_paid')}
@@ -170,93 +153,101 @@ export function BookingForm({ customers, products, onSubmit, initialData, onCanc
 
         <div className="space-y-4">
           <div className="flex justify-between items-center">
-            <label>Products</label>
-            <Button type="button" variant="outline" size="sm" onClick={addItem}>
+            <label className="text-sm font-medium">Products</label>
+            <Button 
+              type="button" 
+              variant="outline" 
+              size="sm" 
+              onClick={() => setShowProductSearch(true)}
+            >
               <Plus className="w-4 h-4 mr-2" />
               Add Product
             </Button>
           </div>
-          {watch('items')?.map((item, index) => (
-            <div key={index} className="flex gap-4 items-start">
-              <div className="flex-1">
-                <Popover
-                  open={openProductPickers[index]}
-                  onOpenChange={(open) => 
-                    setOpenProductPickers({ ...openProductPickers, [index]: open })
-                  }
-                >
-                  <PopoverTrigger asChild>
-                    <Button
-                      variant="outline"
-                      role="combobox"
-                      className={cn(
-                        "w-full justify-between",
-                        !item.product_id && "text-muted-foreground"
-                      )}
-                    >
-                      {item.product_id
-                        ? products.find((product) => product.id === item.product_id)?.name
-                        : "Select product..."}
-                      <Search className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-[400px] p-0">
-                    <Command>
-                      <CommandInput 
-                        placeholder="Search products..."
-                        value={searchQueries[index] || ''}
-                        onValueChange={(search) => 
-                          setSearchQueries({ ...searchQueries, [index]: search })
-                        }
-                      />
-                      <CommandEmpty>No products found.</CommandEmpty>
-                      <CommandGroup>
-                        {filteredProducts(index).map((product) => (
-                          <CommandItem
-                            key={product.id}
-                            onSelect={() => handleProductSelect(product.id, index)}
-                          >
-                            <span>{product.name}</span>
-                            <span className="ml-2 text-sm text-muted-foreground">
-                              (Available: {product.available_stock})
-                            </span>
-                          </CommandItem>
-                        ))}
-                      </CommandGroup>
-                    </Command>
-                  </PopoverContent>
-                </Popover>
-              </div>
-              <div className="w-32">
+
+          {showProductSearch && (
+            <Card className="p-4 space-y-4">
+              <div className="flex items-center gap-2">
+                <Search className="w-4 h-4 text-muted-foreground" />
                 <Input
-                  type="number"
-                  min="1"
-                  placeholder="Quantity"
-                  value={item.quantity}
-                  onChange={(e) => {
-                    const items = watch('items');
-                    items[index].quantity = parseInt(e.target.value) || 1;
-                    setValue('items', [...items]);
-                  }}
-                  required
+                  type="text"
+                  placeholder="Search products..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="flex-1"
+                  autoFocus
                 />
               </div>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                onClick={() => removeItem(index)}
-                disabled={watch('items')?.length === 1}
-              >
-                <X className="w-4 h-4" />
-              </Button>
-            </div>
-          ))}
+              {searchQuery.trim().length > 0 && (
+                <div className="max-h-[200px] overflow-y-auto space-y-2">
+                  {filteredProducts.map((product) => (
+                    <div
+                      key={product.id}
+                      className="flex items-center justify-between p-2 hover:bg-muted/50 rounded-md cursor-pointer"
+                      onClick={() => addProduct(product)}
+                    >
+                      <div>
+                        <p className="font-medium">{product.name}</p>
+                        <p className="text-sm text-muted-foreground">{product.model_no}</p>
+                      </div>
+                      <Badge variant={product.available_stock > 0 ? 'default' : 'destructive'}>
+                        Available: {product.available_stock}
+                      </Badge>
+                    </div>
+                  ))}
+                  {filteredProducts.length === 0 && (
+                    <p className="text-sm text-muted-foreground text-center py-2">
+                      No products found
+                    </p>
+                  )}
+                </div>
+              )}
+            </Card>
+          )}
+
+          <div className="space-y-2">
+            {watch('items')?.map((item, index) => (
+              <div key={index} className="flex gap-4 items-center p-2 bg-muted/50 rounded-md">
+                <div className="flex-1">
+                  <p className="font-medium">{products.find(p => p.id === item.product_id)?.name}</p>
+                  <p className="text-sm text-muted-foreground">
+                    {products.find(p => p.id === item.product_id)?.model_no}
+                  </p>
+                </div>
+                <div className="w-32">
+                  <Input
+                    type="number"
+                    min="1"
+                    placeholder="Quantity"
+                    value={item.quantity}
+                    onChange={(e) => handleQuantityChange(index, parseInt(e.target.value) || 1)}
+                    className={cn(itemErrors[index] && "border-destructive")}
+                  />
+                  {itemErrors[index] && (
+                    <p className="text-xs text-destructive mt-1">{itemErrors[index]}</p>
+                  )}
+                </div>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => removeItem(index)}
+                >
+                  <X className="w-4 h-4" />
+                </Button>
+              </div>
+            ))}
+          </div>
         </div>
       </div>
+
       <div className="flex gap-2">
-        <Button type="submit" className="flex-1">
-          {initialData ? 'Update Booking' : 'Add Booking'}
+        <Button 
+          type="submit" 
+          className="flex-1"
+          disabled={isSubmitting || hasErrors || !watch('items')?.length}
+        >
+          {isSubmitting ? 'Saving...' : initialData ? 'Update Booking' : 'Add Booking'}
         </Button>
         {onCancel && (
           <Button type="button" variant="outline" onClick={onCancel}>

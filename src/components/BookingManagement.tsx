@@ -35,6 +35,7 @@ export function BookingManagement() {
   const [selectedCustomer, setSelectedCustomer] = useState<GroupedBooking | null>(null);
   const [validationError, setValidationError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
     Promise.all([
@@ -44,6 +45,21 @@ export function BookingManagement() {
     ]).finally(() => {
       setIsLoading(false);
     });
+
+    // Subscribe to real-time updates
+    const subscription = supabase
+      .channel('booking_changes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'bookings' }, () => {
+        loadBookings();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'booking_items' }, () => {
+        loadBookings();
+      })
+      .subscribe();
+
+    return () => {
+      subscription.unsubscribe();
+    };
   }, []);
 
   const loadBookings = async () => {
@@ -124,26 +140,46 @@ export function BookingManagement() {
     }
   };
 
-  const checkOverbooked = (items: BookingItem[]): { isOverbooked: boolean; overbooked: string[] } => {
-    const overbooked: string[] = [];
+  const validateBooking = (items: BookingItem[]): { isValid: boolean; message?: string } => {
     for (const item of items) {
       const product = products.find(p => p.id === item.product_id);
-      if (product && item.quantity > product.available_stock) {
-        overbooked.push(product.name);
+      if (!product) {
+        return { isValid: false, message: 'Invalid product selected' };
+      }
+      
+      // For updates, we need to consider the current booking's quantities
+      let currentBookedQuantity = 0;
+      if (editingBooking) {
+        const existingItem = editingBooking.items.find(i => i.product_id === item.product_id);
+        if (existingItem) {
+          currentBookedQuantity = existingItem.quantity;
+        }
+      }
+
+      const availableStock = product.available_stock + currentBookedQuantity;
+      if (item.quantity > availableStock) {
+        return {
+          isValid: false,
+          message: `Not enough stock for ${product.name}. Available: ${availableStock}, Requested: ${item.quantity}`
+        };
       }
     }
-    return { isOverbooked: overbooked.length > 0, overbooked };
+    return { isValid: true };
   };
 
   const handleSubmit = async (data: any) => {
     try {
-      const { isOverbooked, overbooked } = checkOverbooked(data.items);
-      if (isOverbooked) {
-        setValidationError(`The following products are overbooked: ${overbooked.join(', ')}`);
+      setIsSubmitting(true);
+      setValidationError(null);
+
+      const validation = validateBooking(data.items);
+      if (!validation.isValid) {
+        setValidationError(validation.message || 'Invalid booking data');
         return;
       }
 
       if (editingBooking) {
+        // Update existing booking
         const { error: bookingError } = await supabase
           .from('bookings')
           .update({
@@ -152,32 +188,40 @@ export function BookingManagement() {
           })
           .eq('id', editingBooking.id);
 
-        if (!bookingError) {
-          await supabase
-            .from('booking_items')
-            .delete()
-            .eq('booking_id', editingBooking.id);
-
-          const { error: itemsError } = await supabase
-            .from('booking_items')
-            .insert(data.items.map((item: BookingItem) => ({
-              booking_id: editingBooking.id,
-              product_id: item.product_id,
-              quantity: item.quantity
-            })));
-
-          if (!itemsError) {
-            await loadBookings();
-            setIsAddDialogOpen(false);
-            setEditingBooking(null);
-            toast.success('Booking updated successfully');
-          } else {
-            toast.error('Failed to update booking items');
-          }
-        } else {
-          toast.error('Failed to update booking');
+        if (bookingError) {
+          throw bookingError;
         }
+
+        // Delete existing items
+        await supabase
+          .from('booking_items')
+          .delete()
+          .eq('booking_id', editingBooking.id);
+
+        // Insert new items
+        const { error: itemsError } = await supabase
+          .from('booking_items')
+          .insert(data.items.map((item: BookingItem) => ({
+            booking_id: editingBooking.id,
+            product_id: item.product_id,
+            quantity: item.quantity
+          })));
+
+        if (itemsError) {
+          throw itemsError;
+        }
+
+        await logActivity({
+          action_type: 'update',
+          entity_type: 'booking',
+          entity_id: editingBooking.id,
+          description: `Updated booking for customer ${data.customer_id}`,
+          metadata: { items: data.items }
+        });
+
+        toast.success('Booking updated successfully');
       } else {
+        // Create new booking
         const { data: newBooking, error: bookingError } = await supabase
           .from('bookings')
           .insert([{
@@ -187,31 +231,43 @@ export function BookingManagement() {
           .select()
           .single();
 
-        if (newBooking && !bookingError) {
-          const bookingItems = data.items.map((item: BookingItem) => ({
-            booking_id: newBooking.id,
-            product_id: item.product_id,
-            quantity: item.quantity
-          }));
-
-          const { error: itemsError } = await supabase
-            .from('booking_items')
-            .insert(bookingItems);
-
-          if (!itemsError) {
-            await loadBookings();
-            setIsAddDialogOpen(false);
-            toast.success('Booking created successfully');
-          } else {
-            toast.error('Failed to create booking items');
-          }
-        } else {
-          toast.error('Failed to create booking');
+        if (bookingError || !newBooking) {
+          throw bookingError || new Error('Failed to create booking');
         }
+
+        const bookingItems = data.items.map((item: BookingItem) => ({
+          booking_id: newBooking.id,
+          product_id: item.product_id,
+          quantity: item.quantity
+        }));
+
+        const { error: itemsError } = await supabase
+          .from('booking_items')
+          .insert(bookingItems);
+
+        if (itemsError) {
+          throw itemsError;
+        }
+
+        await logActivity({
+          action_type: 'create',
+          entity_type: 'booking',
+          entity_id: newBooking.id,
+          description: `Created new booking for customer ${data.customer_id}`,
+          metadata: { items: data.items }
+        });
+
+        toast.success('Booking created successfully');
       }
+
+      setIsAddDialogOpen(false);
+      setEditingBooking(null);
+      await loadBookings();
     } catch (error) {
       console.error('Error saving booking:', error);
-      toast.error('An error occurred while saving the booking');
+      toast.error('Failed to save booking');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -221,11 +277,21 @@ export function BookingManagement() {
   };
 
   const handleDelete = async (id: string) => {
-    const { error } = await supabase.from('bookings').delete().eq('id', id);
-    if (!error) {
-      loadBookings();
+    try {
+      const { error } = await supabase.from('bookings').delete().eq('id', id);
+      if (error) throw error;
+      
+      await logActivity({
+        action_type: 'delete',
+        entity_type: 'booking',
+        entity_id: id,
+        description: 'Deleted booking',
+      });
+
       toast.success('Booking deleted successfully');
-    } else {
+      await loadBookings();
+    } catch (error) {
+      console.error('Error deleting booking:', error);
       toast.error('Failed to delete booking');
     }
   };
@@ -270,7 +336,9 @@ export function BookingManagement() {
               onCancel={() => {
                 setIsAddDialogOpen(false);
                 setEditingBooking(null);
+                setValidationError(null);
               }}
+              isSubmitting={isSubmitting}
             />
           </DialogContent>
         </Dialog>
