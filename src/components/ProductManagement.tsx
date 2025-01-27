@@ -117,6 +117,68 @@ export function ProductManagement() {
     }
   };
 
+  const checkActiveBookings = async (productId: string): Promise<boolean> => {
+    const { data: bookings, error } = await supabase
+      .from('booking_items')
+      .select('booking_id')
+      .eq('product_id', productId)
+      .limit(1);
+
+    if (error) {
+      console.error('Error checking bookings:', error);
+      return false;
+    }
+
+    return bookings && bookings.length > 0;
+  };
+
+  const handleDelete = async (id: string) => {
+    const loadingToast = showLoadingToast('product', 'delete');
+    
+    try {
+      // Check for active bookings
+      const hasActiveBookings = await checkActiveBookings(id);
+      
+      if (hasActiveBookings) {
+        toast.dismiss(loadingToast);
+        toast.error('Cannot delete product with active bookings');
+        return;
+      }
+
+      const { data: deletedProduct, error } = await supabase
+        .from('products')
+        .delete()
+        .eq('id', id)
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      if (deletedProduct) {
+        await logActivity({
+          action_type: 'delete',
+          entity_type: 'product',
+          entity_id: id,
+          description: `Deleted product ${deletedProduct.name} (${deletedProduct.model_no})`,
+          metadata: deletedProduct
+        });
+        
+        toast.dismiss(loadingToast);
+        showSuccessToast('product', 'delete');
+        setProductToDelete(null);
+        await loadProducts();
+
+        // Update UI components
+        window.dispatchEvent(new CustomEvent('productDeleted', { 
+          detail: { productId: id }
+        }));
+      }
+    } catch (error) {
+      toast.dismiss(loadingToast);
+      showErrorToast('product', 'delete', error);
+    }
+  };
+
   const handleSubmit = async (data: Partial<Product>) => {
     const loadingToast = showLoadingToast('product', editingProduct ? 'update' : 'create');
     
@@ -157,6 +219,11 @@ export function ProductManagement() {
           setIsDialogOpen(false);
           setEditingProduct(null);
           await loadProducts();
+
+          // Update UI components
+          window.dispatchEvent(new CustomEvent('productUpdated', { 
+            detail: { product: updatedProduct }
+          }));
         }
       } else {
         const { data: newProduct, error } = await supabase
@@ -180,6 +247,11 @@ export function ProductManagement() {
           showSuccessToast('product', 'create');
           setIsDialogOpen(false);
           await loadProducts();
+
+          // Update UI components
+          window.dispatchEvent(new CustomEvent('productCreated', { 
+            detail: { product: newProduct }
+          }));
         }
       }
     } catch (error) {
@@ -191,39 +263,6 @@ export function ProductManagement() {
   const handleEdit = (product: Product) => {
     setEditingProduct(product);
     setIsDialogOpen(true);
-  };
-
-  const handleDelete = async (id: string) => {
-    const loadingToast = showLoadingToast('product', 'delete');
-    
-    try {
-      const { data: deletedProduct, error } = await supabase
-        .from('products')
-        .delete()
-        .eq('id', id)
-        .select()
-        .single();
-
-      if (error) throw error;
-
-      if (deletedProduct) {
-        await logActivity({
-          action_type: 'delete',
-          entity_type: 'product',
-          entity_id: id,
-          description: `Deleted product ${deletedProduct.name} (${deletedProduct.model_no})`,
-          metadata: deletedProduct
-        });
-        
-        toast.dismiss(loadingToast);
-        showSuccessToast('product', 'delete');
-        setProductToDelete(null);
-        await loadProducts();
-      }
-    } catch (error) {
-      toast.dismiss(loadingToast);
-      showErrorToast('product', 'delete', error);
-    }
   };
 
   return (

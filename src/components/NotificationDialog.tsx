@@ -16,6 +16,7 @@ import { formatDistanceToNow } from 'date-fns';
 interface ActivityLog {
   id: string;
   user_id: string;
+  user_email: string;
   action_type: string;
   entity_type: string;
   entity_id: string;
@@ -28,13 +29,13 @@ export function NotificationDialog() {
   const [logs, setLogs] = useState<ActivityLog[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [isOpen, setIsOpen] = useState(false);
-  const [userEmail, setUserEmail] = useState<string | null>(null);
+  const [currentUserEmail, setCurrentUserEmail] = useState<string | null>(null);
 
   useEffect(() => {
     // Get current user's email
     supabase.auth.getUser().then(({ data: { user } }) => {
       if (user) {
-        setUserEmail(user.email);
+        setCurrentUserEmail(user.email);
       }
     });
   }, []);
@@ -146,7 +147,7 @@ export function NotificationDialog() {
                       {log.action_type}
                     </Badge>
                     <span className="text-sm font-medium">
-                      {log.user_id === userEmail ? 'You' : 'Another user'}
+                      {log.user_email === currentUserEmail ? 'You' : log.user_email}
                     </span>
                   </div>
                   <span className="text-xs text-muted-foreground">

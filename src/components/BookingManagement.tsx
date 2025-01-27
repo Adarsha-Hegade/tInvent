@@ -51,13 +51,16 @@ export function BookingManagement() {
       setIsLoading(false);
     });
 
+    // Subscribe to real-time updates
     const subscription = supabase
       .channel('booking_changes')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'bookings' }, () => {
         loadBookings();
+        updateBookingCounts();
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'booking_items' }, () => {
         loadBookings();
+        updateBookingCounts();
       })
       .subscribe();
 
@@ -65,6 +68,24 @@ export function BookingManagement() {
       subscription.unsubscribe();
     };
   }, []);
+
+  const updateBookingCounts = async () => {
+    const { data: bookingsData } = await supabase
+      .from('bookings')
+      .select('status');
+
+    if (bookingsData) {
+      // Update counts in parent component or global state if needed
+      const counts = bookingsData.reduce((acc, booking) => ({
+        ...acc,
+        [booking.status]: (acc[booking.status] || 0) + 1,
+        total: (acc.total || 0) + 1
+      }), {} as Record<string, number>);
+
+      // Emit event or update parent component
+      window.dispatchEvent(new CustomEvent('bookingCountsUpdated', { detail: counts }));
+    }
+  };
 
   const loadBookings = async () => {
     const { data: bookingsData, error } = await supabase
@@ -145,22 +166,24 @@ export function BookingManagement() {
   };
 
   const handleSubmit = async (data: any) => {
+    const loadingToast = toast.loading(editingBooking ? 'Updating booking...' : 'Creating booking...');
+
     try {
       setIsSubmitting(true);
 
       if (editingBooking) {
         // Update existing booking
-        const { error: bookingError } = await supabase
+        const { data: updatedBooking, error: bookingError } = await supabase
           .from('bookings')
           .update({
             customer_id: data.customer_id,
             status: data.status
           })
-          .eq('id', editingBooking.id);
+          .eq('id', editingBooking.id)
+          .select()
+          .single();
 
-        if (bookingError) {
-          throw bookingError;
-        }
+        if (bookingError) throw bookingError;
 
         // Delete existing items
         await supabase
@@ -177,9 +200,7 @@ export function BookingManagement() {
             quantity: item.quantity
           })));
 
-        if (itemsError) {
-          throw itemsError;
-        }
+        if (itemsError) throw itemsError;
 
         await logActivity({
           action_type: 'update',
@@ -189,6 +210,7 @@ export function BookingManagement() {
           metadata: { items: data.items }
         });
 
+        toast.dismiss(loadingToast);
         toast.success('Booking updated successfully');
       } else {
         // Create new booking
@@ -215,9 +237,7 @@ export function BookingManagement() {
           .from('booking_items')
           .insert(bookingItems);
 
-        if (itemsError) {
-          throw itemsError;
-        }
+        if (itemsError) throw itemsError;
 
         await logActivity({
           action_type: 'create',
@@ -227,43 +247,59 @@ export function BookingManagement() {
           metadata: { items: data.items }
         });
 
+        toast.dismiss(loadingToast);
         toast.success('Booking created successfully');
       }
 
       setIsAddDialogOpen(false);
       setEditingBooking(null);
       await loadBookings();
+      await updateBookingCounts();
     } catch (error) {
       console.error('Error saving booking:', error);
+      toast.dismiss(loadingToast);
       toast.error('Failed to save booking');
     } finally {
       setIsSubmitting(false);
     }
   };
 
+  const handleDelete = async (id: string) => {
+    const loadingToast = toast.loading('Deleting booking...');
+    
+    try {
+      const { data: deletedBooking, error } = await supabase
+        .from('bookings')
+        .delete()
+        .eq('id', id)
+        .select()
+        .single();
+      
+      if (error) throw error;
+      
+      if (deletedBooking) {
+        await logActivity({
+          action_type: 'delete',
+          entity_type: 'booking',
+          entity_id: id,
+          description: 'Deleted booking',
+        });
+
+        toast.dismiss(loadingToast);
+        toast.success('Booking deleted successfully');
+        await loadBookings();
+        await updateBookingCounts();
+      }
+    } catch (error) {
+      console.error('Error deleting booking:', error);
+      toast.dismiss(loadingToast);
+      toast.error('Failed to delete booking');
+    }
+  };
+
   const handleEdit = (booking: Booking & { items: BookingItem[] }) => {
     setEditingBooking(booking);
     setIsAddDialogOpen(true);
-  };
-
-  const handleDelete = async (id: string) => {
-    try {
-      const { error } = await supabase.from('bookings').delete().eq('id', id);
-      if (error) throw error;
-      
-      await logActivity({
-        action_type: 'delete',
-        entity_type: 'booking',
-        entity_id: id,
-        description: 'Deleted booking',
-      });
-
-      toast.success('Booking deleted successfully');
-      await loadBookings();
-    } catch (error) {
-      console.error('Error deleting booking:', error);
-      toast.error('Failed to delete booking');
-    }
   };
 
   const filteredGroupedBookings = groupedBookings.filter(groupedBooking => {

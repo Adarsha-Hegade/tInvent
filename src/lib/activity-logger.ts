@@ -39,13 +39,20 @@ export async function logActivity({
   if (!user) return;
 
   try {
+    // Get user's email from the session
+    const userEmail = user.email;
+
     const { error } = await supabase.from('activity_logs').insert([{
       user_id: user.id,
+      user_email: userEmail, // Store user's email directly
       action_type,
       entity_type,
       entity_id,
       description,
-      metadata
+      metadata: {
+        ...metadata,
+        performed_by: userEmail // Include user email in metadata as well
+      }
     }]);
 
     if (error) {
@@ -124,6 +131,41 @@ export async function logBookingChange(
       booking,
       items: booking.items,
       customer: booking.customer
+    }
+  });
+}
+
+export async function logCustomerChange(
+  action: 'create' | 'update' | 'delete',
+  customer: Customer,
+  previousCustomer?: Customer
+) {
+  let description = '';
+  
+  switch (action) {
+    case 'create':
+      description = `Created new customer ${customer.name}`;
+      break;
+    case 'update':
+      if (previousCustomer) {
+        const changes = getChangesDescription(previousCustomer, customer);
+        description = `Updated customer ${customer.name}: ${changes}`;
+      }
+      break;
+    case 'delete':
+      description = `Deleted customer ${customer.name}`;
+      break;
+  }
+
+  await logActivity({
+    action_type: action,
+    entity_type: 'customer',
+    entity_id: customer.id,
+    description,
+    metadata: {
+      before: previousCustomer,
+      after: customer,
+      changes: previousCustomer ? getChangesDescription(previousCustomer, customer) : null
     }
   });
 }
