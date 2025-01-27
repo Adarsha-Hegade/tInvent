@@ -85,56 +85,137 @@ export function ProductManagement() {
     }
   };
 
+  const findOrCreateManufacturer = async (name: string) => {
+    if (!name) return null;
+    
+    try {
+      // Try to find existing manufacturer
+      const { data: existing } = await supabase
+        .from('manufacturers')
+        .select('id')
+        .ilike('factory_name', name)
+        .single();
+
+      if (existing) return existing.id;
+
+      // Create new manufacturer if not found
+      const { data: created, error } = await supabase
+        .from('manufacturers')
+        .insert([{ factory_name: name }])
+        .select('id')
+        .single();
+
+      if (error) throw error;
+      return created?.id || null;
+    } catch (error) {
+      console.error('Error handling manufacturer:', error);
+      return null;
+    }
+  };
+
+  const findOrCreateCategory = async (name: string) => {
+    if (!name) return null;
+    
+    try {
+      // Try to find existing category
+      const { data: existing } = await supabase
+        .from('categories')
+        .select('id')
+        .ilike('name', name)
+        .single();
+
+      if (existing) return existing.id;
+
+      // Create new category if not found
+      const { data: created, error } = await supabase
+        .from('categories')
+        .insert([{ name }])
+        .select('id')
+        .single();
+
+      if (error) throw error;
+      return created?.id || null;
+    } catch (error) {
+      console.error('Error handling category:', error);
+      return null;
+    }
+  };
+
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
-    if (file) {
-      const loadingToast = showLoadingToast('product', 'create');
-      
-      Papa.parse(file, {
-        complete: async (results) => {
-          try {
-            const products = results.data.slice(1).map((row: any) => ({
-              model_no: row[0],
-              name: row[1],
-              description: row[2],
-              manufacturer_id: row[3],
-              category_id: row[4],
-              price: parseFloat(row[5]) || 0,
-              remarks: row[6],
-              internal_notes: row[7],
-              total_stock: parseInt(row[8]),
-              bad_stock: parseInt(row[9]),
-              dead_stock: parseInt(row[10]),
-            }));
+    if (!file) return;
 
-            const { data: newProducts, error } = await supabase
-              .from('products')
-              .insert(products)
-              .select();
+    const loadingToast = showLoadingToast('product', 'create');
+    
+    Papa.parse(file, {
+      header: true,
+      skipEmptyLines: true,
+      complete: async (results) => {
+        try {
+          const productsToUpsert = await Promise.all(
+            results.data.map(async (row: any) => {
+              // Get or create manufacturer and category
+              const manufacturerId = await findOrCreateManufacturer(row.Manufacturer);
+              const categoryId = await findOrCreateCategory(row.Category);
 
-            if (error) throw error;
+              return {
+                model_no: row['Model No'],
+                name: row.Name,
+                description: row.Description,
+                manufacturer_id: manufacturerId,
+                category_id: categoryId,
+                price: parseFloat(row.Price) || 0,
+                total_stock: parseInt(row['Total Stock']) || 0,
+                bad_stock: parseInt(row['Bad Stock']) || 0,
+                dead_stock: parseInt(row['Dead Stock']) || 0,
+                remarks: row.Remarks,
+                internal_notes: row['Internal Notes'],
+                size: row.Size,
+                finish: row.Finish
+              };
+            })
+          );
 
-            if (newProducts) {
-              await logActivity({
-                action_type: 'create',
-                entity_type: 'products',
-                entity_id: newProducts[0].id,
-                description: `Imported ${newProducts.length} products via CSV`,
-                metadata: { products: newProducts }
-              });
-              
-              toast.dismiss(loadingToast);
-              showSuccessToast('product', 'create');
-              await loadProducts();
-            }
-          } catch (error) {
-            toast.dismiss(loadingToast);
-            showErrorToast('product', 'create', error);
+          // Filter out invalid entries
+          const validProducts = productsToUpsert.filter(p => p.model_no && p.name);
+
+          if (validProducts.length === 0) {
+            throw new Error('No valid products found in CSV');
           }
-        },
-        header: true,
-      });
-    }
+
+          // Upsert products based on model_no
+          const { error } = await supabase
+            .from('products')
+            .upsert(validProducts, {
+              onConflict: 'model_no'
+            });
+
+          if (error) throw error;
+
+          await logActivity({
+            action_type: 'create',
+            entity_type: 'products',
+            entity_id: validProducts[0].model_no,
+            description: `Imported ${validProducts.length} products via CSV`,
+            metadata: { products: validProducts }
+          });
+          
+          toast.dismiss(loadingToast);
+          toast.success(`Successfully imported ${validProducts.length} products`);
+          await loadProducts();
+        } catch (error: any) {
+          toast.dismiss(loadingToast);
+          toast.error(`Import failed: ${error.message}`);
+        }
+      },
+      error: (error) => {
+        toast.dismiss(loadingToast);
+        toast.error(`CSV parsing failed: ${error.message}`);
+      }
+    });
+
+    // Reset file input
+    event.target.value = '';
   };
 
   const checkActiveBookings = async (productId: string): Promise<boolean> => {
@@ -293,13 +374,18 @@ export function ProductManagement() {
       'Description': product.description || '',
       'Category': product.category?.name || '',
       'Manufacturer': product.manufacturer?.factory_name || '',
-      'Price': product.price,
-      'Total Stock': product.total_stock,
-      'Available Stock': product.available_stock,
-      'Bad Stock': product.bad_stock,
-      'Dead Stock': product.dead_stock,
+      'Price': product.price || 0,
+      'Total Stock': product.total_stock || 0,
+      'Available Stock': product.available_stock || 0,
+      'Bad Stock': product.bad_stock || 0,
+      'Dead Stock': product.dead_stock || 0,
+      'Bookings': product.bookings || 0,
       'Remarks': product.remarks || '',
-      'Internal Notes': product.internal_notes || ''
+      'Internal Notes': product.internal_notes || '',
+      'Size': product.size || '',
+      'Finish': product.finish || '',
+      'Created At': product.created_at || '',
+      'Updated At': product.updated_at || ''
     }));
 
     const csv = Papa.unparse(exportData);

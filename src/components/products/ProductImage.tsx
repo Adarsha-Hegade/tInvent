@@ -7,6 +7,7 @@ interface ProductImageProps {
 
 export function ProductImage({ modelNo, name }: ProductImageProps) {
   const imageUrl = `/images/${modelNo}.png`;
+  
 
   return (
     <div className="w-16 h-16 relative flex items-center justify-center bg-muted rounded-md overflow-hidden">
