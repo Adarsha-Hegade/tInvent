@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react';
-import { Plus, Upload } from 'lucide-react';
+import { Plus, Upload, ListFilter } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { ProductList } from './products/ProductList';
 import { ProductForm } from './products/ProductForm';
+import { CategoryManagement } from './products/CategoryManagement';
 import { supabase } from '@/lib/supabase';
 import { logActivity } from '@/lib/activity-logger';
 import { showSuccessToast, showErrorToast, showLoadingToast } from '@/lib/toast-utils';
@@ -14,11 +15,14 @@ import type { Database } from '@/lib/database.types';
 
 type Product = Database['public']['Tables']['products']['Row'];
 type Manufacturer = Database['public']['Tables']['manufacturers']['Row'];
+type Category = Database['public']['Tables']['categories']['Row'];
 
 export function ProductManagement() {
   const [products, setProducts] = useState<Product[]>([]);
   const [manufacturers, setManufacturers] = useState<Manufacturer[]>([]);
+  const [categories, setCategories] = useState<Category[]>([]);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [isCategoryDialogOpen, setIsCategoryDialogOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [productToDelete, setProductToDelete] = useState<Product | null>(null);
@@ -26,12 +30,16 @@ export function ProductManagement() {
   useEffect(() => {
     loadManufacturers();
     loadProducts();
+    loadCategories();
 
     // Subscribe to real-time updates
     const subscription = supabase
       .channel('product_changes')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'products' }, () => {
         loadProducts();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'categories' }, () => {
+        loadCategories();
       })
       .subscribe();
 
@@ -44,7 +52,7 @@ export function ProductManagement() {
     try {
       const { data, error } = await supabase
         .from('products')
-        .select('*, manufacturer:manufacturer_id(*)')
+        .select('*, manufacturer:manufacturer_id(*), category:category_id(*)')
         .order('name');
       
       if (error) throw error;
@@ -67,6 +75,16 @@ export function ProductManagement() {
     }
   };
 
+  const loadCategories = async () => {
+    try {
+      const { data, error } = await supabase.from('categories').select('*');
+      if (error) throw error;
+      if (data) setCategories(data);
+    } catch (error) {
+      showErrorToast('category', 'read', error);
+    }
+  };
+
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file) {
@@ -80,11 +98,13 @@ export function ProductManagement() {
               name: row[1],
               description: row[2],
               manufacturer_id: row[3],
-              remarks: row[4],
-              internal_notes: row[5],
-              total_stock: parseInt(row[6]),
-              bad_stock: parseInt(row[7]),
-              dead_stock: parseInt(row[8]),
+              category_id: row[4],
+              price: parseFloat(row[5]) || 0,
+              remarks: row[6],
+              internal_notes: row[7],
+              total_stock: parseInt(row[8]),
+              bad_stock: parseInt(row[9]),
+              dead_stock: parseInt(row[10]),
             }));
 
             const { data: newProducts, error } = await supabase
@@ -218,6 +238,7 @@ export function ProductManagement() {
           showSuccessToast('product', 'update');
           setIsDialogOpen(false);
           setEditingProduct(null);
+
           await loadProducts();
 
           // Update UI components
@@ -265,11 +286,43 @@ export function ProductManagement() {
     setIsDialogOpen(true);
   };
 
+  const handleExport = () => {
+    const exportData = products.map(product => ({
+      'Model No': product.model_no,
+      'Name': product.name,
+      'Description': product.description || '',
+      'Category': product.category?.name || '',
+      'Manufacturer': product.manufacturer?.factory_name || '',
+      'Price': product.price,
+      'Total Stock': product.total_stock,
+      'Available Stock': product.available_stock,
+      'Bad Stock': product.bad_stock,
+      'Dead Stock': product.dead_stock,
+      'Remarks': product.remarks || '',
+      'Internal Notes': product.internal_notes || ''
+    }));
+
+    const csv = Papa.unparse(exportData);
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    link.setAttribute('download', `products_export_${new Date().toISOString().split('T')[0]}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   return (
     <div className="space-y-4">
       <div className="flex justify-between items-center">
         <h2 className="text-2xl font-bold">Product Management</h2>
         <div className="flex gap-2">
+          <Button variant="outline" onClick={handleExport}>
+            <Upload className="w-4 h-4 mr-2" />
+            Export CSV
+          </Button>
           <Button variant="outline" onClick={() => document.getElementById('csvUpload')?.click()}>
             <Upload className="w-4 h-4 mr-2" />
             Import CSV
@@ -281,6 +334,10 @@ export function ProductManagement() {
             className="hidden"
             onChange={handleFileUpload}
           />
+          <Button variant="outline" onClick={() => setIsCategoryDialogOpen(true)}>
+            <ListFilter className="w-4 h-4 mr-2" />
+            Manage Categories
+          </Button>
           <Dialog open={isDialogOpen} onOpenChange={(open) => {
             setIsDialogOpen(open);
             if (!open) {
@@ -300,6 +357,7 @@ export function ProductManagement() {
               <ProductForm
                 product={editingProduct || undefined}
                 manufacturers={manufacturers}
+                categories={categories}
                 onSubmit={handleSubmit}
                 isLoading={isLoading}
               />
@@ -312,6 +370,11 @@ export function ProductManagement() {
         products={products}
         onEdit={handleEdit} 
         onDelete={(product) => setProductToDelete(product)} 
+      />
+
+      <CategoryManagement
+        isOpen={isCategoryDialogOpen}
+        onClose={() => setIsCategoryDialogOpen(false)}
       />
 
       <AlertDialog open={!!productToDelete} onOpenChange={(open) => !open && setProductToDelete(null)}>

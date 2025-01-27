@@ -19,6 +19,8 @@ export interface Database {
           finish: string | null
           manufacturer: string | null
           manufacturer_id: string | null
+          category_id: string | null
+          price: number
           remarks: string | null
           internal_notes: string | null
           total_stock: number
@@ -38,6 +40,8 @@ export interface Database {
           finish?: string | null
           manufacturer?: string | null
           manufacturer_id?: string | null
+          category_id?: string | null
+          price?: number
           remarks?: string | null
           internal_notes?: string | null
           total_stock?: number
@@ -54,12 +58,33 @@ export interface Database {
           finish?: string | null
           manufacturer?: string | null
           manufacturer_id?: string | null
+          category_id?: string | null
+          price?: number
           remarks?: string | null
           internal_notes?: string | null
           total_stock?: number
           bad_stock?: number
           dead_stock?: number
           bookings?: number
+        }
+      }
+      categories: {
+        Row: {
+          id: string
+          name: string
+          description: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          name: string
+          description?: string | null
+        }
+        Update: {
+          id?: string
+          name?: string
+          description?: string | null
         }
       }
       manufacturers: {

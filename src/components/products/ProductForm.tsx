@@ -5,25 +5,27 @@ import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Loader2 } from 'lucide-react';
 import type { Database } from '@/lib/database.types';
-import { toast } from 'sonner';
-
 
 type Product = Database['public']['Tables']['products']['Row'];
 type Manufacturer = Database['public']['Tables']['manufacturers']['Row'];
+type Category = Database['public']['Tables']['categories']['Row'];
 
 interface ProductFormProps {
   product?: Product;
   manufacturers: Manufacturer[];
+  categories: Category[];
   onSubmit: (data: Partial<Product>) => Promise<void>;
   isLoading?: boolean;
 }
 
-export function ProductForm({ product, manufacturers, onSubmit, isLoading }: ProductFormProps) {
+export function ProductForm({ product, manufacturers, categories, onSubmit, isLoading }: ProductFormProps) {
   const { register, handleSubmit, setValue, watch } = useForm<Partial<Product>>({
     defaultValues: {
       model_no: product?.model_no || '',
       name: product?.name || '',
       manufacturer_id: product?.manufacturer_id || '',
+      category_id: product?.category_id || '',
+      price: product?.price || 0,
       description: product?.description || '',
       remarks: product?.remarks || '',
       internal_notes: product?.internal_notes || '',
@@ -37,6 +39,20 @@ export function ProductForm({ product, manufacturers, onSubmit, isLoading }: Pro
     // Remove generated columns before submitting
     const { available_stock, bookings, created_at, updated_at, ...submitData } = data as any;
     await onSubmit(submitData);
+  };
+
+  const formatPrice = (value: string) => {
+    // Remove non-numeric characters except decimal point
+    const numericValue = value.replace(/[^\d.]/g, '');
+    
+    // Ensure only two decimal places
+    const parts = numericValue.split('.');
+    if (parts.length > 1) {
+      parts[1] = parts[1].slice(0, 2);
+      return parts.join('.');
+    }
+    
+    return numericValue;
   };
 
   return (
@@ -68,6 +84,42 @@ export function ProductForm({ product, manufacturers, onSubmit, isLoading }: Pro
               ))}
             </SelectContent>
           </Select>
+        </div>
+        <div className="space-y-2">
+          <label>Category</label>
+          <Select
+            value={watch('category_id')}
+            onValueChange={(value) => setValue('category_id', value)}
+            disabled={isLoading}
+          >
+            <SelectTrigger>
+              <SelectValue placeholder="Select category" />
+            </SelectTrigger>
+            <SelectContent>
+              {categories.map((category) => (
+                <SelectItem key={category.id} value={category.id}>
+                  {category.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-2">
+          <label>Price (₹)</label>
+          <Input
+            type="number"
+            step="0.01"
+            min="0"
+            {...register('price', {
+              valueAsNumber: true,
+              required: true,
+              min: 0,
+              onChange: (e) => {
+                e.target.value = formatPrice(e.target.value);
+              }
+            })}
+            disabled={isLoading}
+          />
         </div>
         <div className="space-y-2">
           <label>Description</label>
