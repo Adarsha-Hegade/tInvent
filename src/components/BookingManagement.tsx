@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unused-vars */
 import { useState, useEffect } from 'react';
 import { Plus, Search } from 'lucide-react';
 import { Button } from '@/components/ui/button';

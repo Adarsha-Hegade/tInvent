@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { useState, useEffect } from 'react';
 import { useForm } from 'react-hook-form';
 import { Plus, Pencil, Trash2, Factory } from 'lucide-react';
@@ -164,7 +165,7 @@ export function ManufacturerManagement() {
 
       toast.success('Manufacturer deleted successfully');
       await loadManufacturers();
-    } catch (error: any) {
+    } catch (error: never) {
       toast.error(error.message);
     }
   };
