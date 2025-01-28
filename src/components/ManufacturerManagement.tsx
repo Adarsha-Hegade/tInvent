@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useForm } from 'react-hook-form';
-import { Plus, Pencil, Trash2, Factory, Package2 } from 'lucide-react';
+import { Plus, Pencil, Trash2, Factory } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
@@ -8,14 +8,23 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Avatar } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Textarea } from '@/components/ui/textarea';
+import { ManufacturerView } from './manufacturers/ManufacturerView';
 import { supabase } from '@/lib/supabase';
+import { logActivity } from '@/lib/activity-logger';
+import { toast } from 'sonner';
 import type { Database } from '@/lib/database.types';
 
 type Manufacturer = Database['public']['Tables']['manufacturers']['Row'];
 type Product = Database['public']['Tables']['products']['Row'];
+type Category = Database['public']['Tables']['categories']['Row'];
 
 interface ManufacturerWithProducts extends Manufacturer {
-  products?: Product[];
+  products?: (Product & { category?: Category })[];
+}
+
+interface CategoryCount {
+  name: string;
+  count: number;
 }
 
 function getInitials(name: string) {
@@ -39,10 +48,30 @@ function getAvatarColor(name: string) {
   return colors[index % colors.length];
 }
 
+function truncateText(text: string, wordCount: number) {
+  if (!text) return '';
+  const words = text.split(' ');
+  if (words.length <= wordCount) return text;
+  return words.slice(0, wordCount).join(' ') + '...';
+}
+
+function getCategoryCounts(products: (Product & { category?: Category })[]): CategoryCount[] {
+  const counts = products.reduce((acc: { [key: string]: number }, product) => {
+    const categoryName = product.category?.name || 'Uncategorized';
+    acc[categoryName] = (acc[categoryName] || 0) + 1;
+    return acc;
+  }, {});
+
+  return Object.entries(counts)
+    .map(([name, count]) => ({ name, count }))
+    .sort((a, b) => b.count - a.count);
+}
+
 export function ManufacturerManagement() {
   const [manufacturers, setManufacturers] = useState<ManufacturerWithProducts[]>([]);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingManufacturer, setEditingManufacturer] = useState<Manufacturer | null>(null);
+  const [selectedManufacturer, setSelectedManufacturer] = useState<ManufacturerWithProducts | null>(null);
   const { register, handleSubmit, reset, setValue } = useForm<Manufacturer>();
 
   useEffect(() => {
@@ -59,7 +88,10 @@ export function ManufacturerManagement() {
         manufacturersData.map(async (manufacturer) => {
           const { data: products } = await supabase
             .from('products')
-            .select('*')
+            .select(`
+              *,
+              category:category_id(*)
+            `)
             .eq('manufacturer_id', manufacturer.id);
           
           return {
@@ -80,25 +112,33 @@ export function ManufacturerManagement() {
           .update(data)
           .eq('id', editingManufacturer.id);
         
-        if (!error) {
-          await loadManufacturers();
-          setIsDialogOpen(false);
-          setEditingManufacturer(null);
-          reset();
-        }
+        if (error) throw error;
+
+        await logActivity({
+          action_type: 'update',
+          entity_type: 'manufacturer',
+          entity_id: editingManufacturer.id,
+          description: `Updated manufacturer ${data.factory_name}`,
+          metadata: { before: editingManufacturer, after: data }
+        });
+        
+        toast.success('Manufacturer updated successfully');
       } else {
         const { error } = await supabase
           .from('manufacturers')
           .insert([data]);
         
-        if (!error) {
-          await loadManufacturers();
-          setIsDialogOpen(false);
-          reset();
-        }
+        if (error) throw error;
+
+        toast.success('Manufacturer created successfully');
       }
-    } catch (error) {
-      console.error('Error saving manufacturer:', error);
+
+      await loadManufacturers();
+      setIsDialogOpen(false);
+      setEditingManufacturer(null);
+      reset();
+    } catch (error: any) {
+      toast.error(error.message);
     }
   };
 
@@ -111,18 +151,32 @@ export function ManufacturerManagement() {
   };
 
   const handleDelete = async (id: string) => {
-    const { error } = await supabase.from('manufacturers').delete().eq('id', id);
-    if (!error) {
+    try {
+      const { error } = await supabase.from('manufacturers').delete().eq('id', id);
+      if (error) throw error;
+
+      await logActivity({
+        action_type: 'delete',
+        entity_type: 'manufacturer',
+        entity_id: id,
+        description: 'Deleted manufacturer',
+      });
+
+      toast.success('Manufacturer deleted successfully');
       await loadManufacturers();
+    } catch (error: any) {
+      toast.error(error.message);
     }
   };
 
-  const getStockStatus = (product: Product) => {
-    const availableStock = product.available_stock;
-    if (availableStock <= 0) return { status: 'Out of Stock', variant: 'destructive' as const };
-    if (availableStock <= 10) return { status: 'Low Stock', variant: 'warning' as const };
-    return { status: 'In Stock', variant: 'default' as const };
-  };
+  if (selectedManufacturer) {
+    return (
+      <ManufacturerView
+        manufacturer={selectedManufacturer}
+        onBack={() => setSelectedManufacturer(null)}
+      />
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -169,76 +223,88 @@ export function ManufacturerManagement() {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {manufacturers.map((manufacturer) => (
-          <Card key={manufacturer.id} className="relative overflow-hidden group">
-            <CardContent className="p-6">
-              <div className="flex flex-col space-y-4">
-                <div className="flex items-start justify-between">
-                  <div className="flex items-center space-x-4">
-                    <Avatar className={`h-12 w-12 items-center justify-center ${getAvatarColor(manufacturer.factory_name)}`}>
-                      <span className="text-lg font-semibold">
-                        {getInitials(manufacturer.factory_name)}
-                      </span>
-                    </Avatar>
-                    <div>
-                      <h3 className="text-lg font-semibold">{manufacturer.factory_name}</h3>
-                      {manufacturer.contact_person && (
-                        <p className="text-sm text-muted-foreground">
-                          Contact: {manufacturer.contact_person}
-                        </p>
-                      )}
+        {manufacturers.map((manufacturer) => {
+          const categoryCounts = getCategoryCounts(manufacturer.products || []);
+          const totalProducts = manufacturer.products?.length || 0;
+
+          return (
+            <Card 
+              key={manufacturer.id} 
+              className="relative overflow-hidden group cursor-pointer hover:shadow-lg transition-shadow"
+              onClick={() => setSelectedManufacturer(manufacturer)}
+            >
+              <CardContent className="p-6">
+                <div className="flex flex-col space-y-4">
+                  <div className="flex items-start justify-between">
+                    <div className="flex items-center space-x-4">
+                      <Avatar className={`h-12 w-12 items-center justify-center ${getAvatarColor(manufacturer.factory_name)}`}>
+                        <span className="text-lg font-semibold">
+                          {getInitials(manufacturer.factory_name)}
+                        </span>
+                      </Avatar>
+                      <div>
+                        <h3 className="text-lg font-semibold">{manufacturer.factory_name}</h3>
+                        {manufacturer.contact_person && (
+                          <p className="text-sm text-muted-foreground flex items-center gap-2">
+                            <Factory className="w-4 h-4" />
+                            {manufacturer.contact_person}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <Button 
+                        variant="ghost" 
+                        size="icon" 
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleEdit(manufacturer);
+                        }}
+                      >
+                        <Pencil className="w-4 h-4" />
+                      </Button>
+                      <Button 
+                        variant="ghost" 
+                        size="icon" 
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDelete(manufacturer.id);
+                        }}
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </Button>
                     </div>
                   </div>
-                  <div className="flex gap-2">
-                    <Button variant="ghost" size="icon" onClick={() => handleEdit(manufacturer)}>
-                      <Pencil className="w-4 h-4" />
-                    </Button>
-                    <Button variant="ghost" size="icon" onClick={() => handleDelete(manufacturer.id)}>
-                      <Trash2 className="w-4 h-4" />
-                    </Button>
+
+                  {manufacturer.notes && (
+                    <div className="bg-muted/50 rounded-lg p-3">
+                      <p className="text-sm text-muted-foreground">
+                        {truncateText(manufacturer.notes, 15)}
+                      </p>
+                    </div>
+                  )}
+
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <h4 className="font-medium text-sm">Product Categories</h4>
+                      <Badge variant="secondary">
+                        {totalProducts} product{totalProducts !== 1 ? 's' : ''}
+                      </Badge>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {categoryCounts.map(({ name, count }) => (
+                        <Badge key={name} variant="outline" className="flex items-center gap-1">
+                          <span>{name}</span>
+                          <span className="text-muted-foreground">({count})</span>
+                        </Badge>
+                      ))}
+                    </div>
                   </div>
                 </div>
-
-                {manufacturer.notes && (
-                  <div className="bg-muted/50 rounded-lg p-3">
-                    <p className="text-sm">{manufacturer.notes}</p>
-                  </div>
-                )}
-
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <h4 className="font-medium text-sm">Products</h4>
-                    <Badge variant="secondary">
-                      {manufacturer.products?.length || 0} products
-                    </Badge>
-                  </div>
-                  <div className="space-y-2">
-                    {manufacturer.products?.map((product) => {
-                      const { status, variant } = getStockStatus(product);
-                      return (
-                        <div
-                          key={product.id}
-                          className="flex items-center justify-between p-2 bg-muted/30 rounded-lg"
-                        >
-                          <div className="flex items-center space-x-2">
-                            <Package2 className="w-4 h-4 text-muted-foreground" />
-                            <div>
-                              <p className="text-sm font-medium">{product.name}</p>
-                              <p className="text-xs text-muted-foreground">
-                                {product.model_no}
-                              </p>
-                            </div>
-                          </div>
-                          <Badge variant={variant}>{status}</Badge>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        ))}
+              </CardContent>
+            </Card>
+          );
+        })}
       </div>
     </div>
   );
